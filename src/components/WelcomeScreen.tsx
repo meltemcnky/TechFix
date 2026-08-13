@@ -54,18 +54,18 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({
           <div className="lg:col-span-7 space-y-6">
             <div className="inline-flex items-center space-x-2 px-3 py-1 rounded-full bg-brand-500/10 border border-brand-500/20 text-brand-300 text-xs font-semibold">
               <Sparkles className="w-3.5 h-3.5 text-brand-400" />
-              <span>Medeniyet Teknopark Dijital Platformu</span>
+              <span>Medeniyet Teknopark • TechFix Tesis Yönetimi</span>
             </div>
 
             <h1 className="text-3xl sm:text-5xl font-extrabold text-white tracking-tight leading-tight">
-              Anlık Bina <br className="hidden sm:inline" />
+              Teknik Arıza Bildirim Sistemi & <br className="hidden sm:inline" />
               <span className="bg-gradient-to-r from-brand-400 via-sky-300 to-indigo-400 bg-clip-text text-transparent">
-                Arıza Yönetimi
+                Tesis Yönetim Platformu
               </span>
             </h1>
 
             <p className="text-slate-300 text-sm sm:text-base leading-relaxed max-w-xl">
-              Bina bakım, elektrik arızası, tesisat, klima ve ekipman sorunlarını kapı QR kodunu tarayarak hesap oluşturmadan 60 saniyeden kısa sürede bildirin.
+              Medeniyet Teknopark bünyesindeki iklimlendirme, elektrik, su & tesisat ve ekipman arızalarını hesap oluşturmadan 60 saniyede bildirin, anlık bildirim takibi ile durumunu izleyin.
             </p>
 
             {/* Quick Actions Buttons */}

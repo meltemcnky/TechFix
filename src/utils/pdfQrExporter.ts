@@ -39,12 +39,12 @@ export const generateQrPdf = async (targetUrl: string, isProduction: boolean) =>
   doc.setTextColor(255, 255, 255);
   doc.setFontSize(20);
   doc.setFont('helvetica', 'bold');
-  doc.text('TechFix - Ariza / Talep Bildirim Sistemi', pageWidth / 2, 22, { align: 'center' });
+  doc.text('TechFix Teknik Ariza Bildirim Sistemi', pageWidth / 2, 22, { align: 'center' });
 
   doc.setFontSize(11);
   doc.setFont('helvetica', 'normal');
   doc.setTextColor(148, 163, 184);
-  doc.text('Medeniyet Teknopark Hizmet Platformu', pageWidth / 2, 33, { align: 'center' });
+  doc.text('Medeniyet Teknopark Tesis Yönetimi Platformu', pageWidth / 2, 33, { align: 'center' });
 
   // Embedded High-Res QR Image (Centered, 100mm x 100mm for maximum readability)
   const qrSize = 100;
@@ -59,11 +59,11 @@ export const generateQrPdf = async (targetUrl: string, isProduction: boolean) =>
   // Add QR code image
   doc.addImage(qrDataUrl, 'PNG', qrX, qrY, qrSize, qrSize);
 
-  // Subtitle directly under QR: "QR kodu okutarak bildirim oluşturabilirsiniz."
+  // Subtitle directly under QR: "Bildirim oluşturmak için QR kodu telefonunuzla okutunuz."
   doc.setTextColor(15, 23, 42); // slate-900
-  doc.setFontSize(15);
+  doc.setFontSize(14);
   doc.setFont('helvetica', 'bold');
-  doc.text('QR kodu okutarak bildirim olusturabilirsiniz.', pageWidth / 2, 185, { align: 'center' });
+  doc.text('Bildirim olusturmak icin QR kodu telefonunuzla okutunuz.', pageWidth / 2, 185, { align: 'center' });
 
   doc.setFontSize(10);
   doc.setFont('helvetica', 'normal');

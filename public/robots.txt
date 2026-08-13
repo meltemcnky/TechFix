@@ -1,0 +1,7 @@
+# TechFix Robots.txt for Googlebot & Search Engine Indexing
+User-agent: *
+Allow: /
+Disallow: /admin
+
+# Sitemap Location
+Sitemap: https://techfix.medeniyetteknopark.com/sitemap.xml
