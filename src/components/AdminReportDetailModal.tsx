@@ -13,7 +13,8 @@ import {
   Archive, 
   Tag, 
   Image as ImageIcon,
-  ZoomIn
+  ZoomIn,
+  Users
 } from 'lucide-react';
 import { Report, ReportPriority, ReportStatus, VALID_STATUS_TRANSITIONS, STATUS_LABELS_TR, PRIORITY_LABELS_TR, CATEGORY_LABELS_TR } from '../types';
 import { 
@@ -139,6 +140,12 @@ export const AdminReportDetailModal: React.FC<AdminReportDetailModalProps> = ({
               }`}>
                 {STATUS_LABELS_TR[report.status] || report.status}
               </span>
+              {(report.affectedCount ?? 1) > 1 && (
+                <span className="px-3 py-1 rounded-full bg-rose-500/20 text-rose-300 border border-rose-500/30 text-xs font-bold flex items-center space-x-1">
+                  <Users className="w-3.5 h-3.5 text-rose-400" />
+                  <span>{report.affectedCount} kişi etkileniyor</span>
+                </span>
+              )}
             </div>
             <p className="text-xs text-slate-400 mt-1 flex items-center space-x-2">
               <Building2 className="w-3.5 h-3.5 text-brand-400" />

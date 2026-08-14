@@ -64,6 +64,7 @@ export interface Report {
   submissionDate: string;
   lastUpdatedDate: string;
   resolutionDate?: string;
+  affectedCount?: number; // Number of affected users reporting the same issue
   adminNotes?: string; // Private administrator notes
   publicNotes?: string; // Visible on tracking page
   timeline: TimelineEvent[];

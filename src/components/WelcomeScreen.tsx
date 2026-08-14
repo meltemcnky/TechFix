@@ -113,58 +113,58 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({
             </div>
           </div>
 
-          {/* Interactive QR Code Scan Simulator Card */}
+          {/* Tek Ortak QR Model Info Card */}
           <div className="lg:col-span-5">
-            <div className="glass-card rounded-2xl p-6 border border-slate-700/80 shadow-2xl relative">
+            <div className="glass-card rounded-2xl p-6 border border-slate-700/80 shadow-2xl relative space-y-5">
               <div className="flex items-center justify-between pb-4 border-b border-slate-800">
                 <div className="flex items-center space-x-2">
-                  <div className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-ping" />
+                  <div className="w-2.5 h-2.5 rounded-full bg-brand-400 animate-pulse" />
                   <span className="text-xs font-bold text-white uppercase tracking-wider">
-                    QR Kapı Tarama Simülatörü
+                    Tek Ortak QR Sistemi
                   </span>
                 </div>
-                <span className="text-[10px] px-2 py-0.5 rounded bg-brand-500/20 text-brand-300 font-mono">
-                  Teknopark QR v1
+                <span className="text-[10px] px-2.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 font-bold border border-emerald-500/30">
+                  Hızlı Bildirim
                 </span>
               </div>
 
-              <div className="py-5 text-center space-y-4">
-                {/* QR Code graphic container */}
-                <div className="mx-auto w-40 h-40 bg-white p-3 rounded-2xl shadow-glow-brand flex flex-col items-center justify-center border-4 border-slate-900">
-                  <svg viewBox="0 0 100 100" className="w-full h-full text-slate-900 fill-current">
-                    <path d="M0,0 H30 V30 H0 Z M10,10 H20 V20 H10 Z M70,0 H100 V30 H70 Z M80,10 H90 V20 H80 Z M0,70 H30 V100 H0 Z M10,80 H20 V90 H10 Z M40,10 H60 V20 H40 Z M10,40 H20 V60 H10 Z M40,40 H60 V60 H40 Z M70,40 H80 V60 H70 Z M40,70 H50 V90 H40 Z M70,70 H100 V80 H70 Z M80,80 H90 V100 H80 Z" />
-                  </svg>
+              <div className="space-y-4">
+                <div className="p-4 rounded-xl bg-slate-900/80 border border-slate-800 space-y-3">
+                  <div className="flex items-start space-x-3">
+                    <div className="p-2 rounded-lg bg-brand-500/10 text-brand-400 flex-shrink-0 mt-0.5">
+                      <QrCode className="w-5 h-5" />
+                    </div>
+                    <div className="space-y-1 text-xs">
+                      <h4 className="font-bold text-white">Tek Ortak QR İle Erişim</h4>
+                      <p className="text-slate-400 leading-relaxed">
+                        Medeniyet Teknopark genelindeki panolardan tek ortak QR kodunu taratarak formu açın.
+                      </p>
+                    </div>
+                  </div>
                 </div>
 
-                <div className="space-y-2 max-w-xs mx-auto">
-                  <label className="text-xs text-slate-400 font-medium block">
-                    Teknopark ofis kapısındaki QR kodu taramayı simüle edin:
-                  </label>
-                  <select
-                    value={selectedDemoCompany}
-                    onChange={(e) => setSelectedDemoCompany(e.target.value)}
-                    className="w-full text-xs bg-slate-900 border border-slate-700 text-slate-200 rounded-xl px-3 py-2.5 focus:border-brand-500 focus:outline-none"
-                  >
-                    {companies.map((c) => (
-                      <option key={c.id} value={c.id}>
-                        {c.name} ({c.building} — {c.floor} — {c.officeNumber})
-                      </option>
-                    ))}
-                  </select>
+                <div className="p-4 rounded-xl bg-slate-900/80 border border-slate-800 space-y-3">
+                  <div className="flex items-start space-x-3">
+                    <div className="p-2 rounded-lg bg-indigo-500/10 text-indigo-400 flex-shrink-0 mt-0.5">
+                      <Building2 className="w-5 h-5" />
+                    </div>
+                    <div className="space-y-1 text-xs">
+                      <h4 className="font-bold text-white">Ofis & Konum Seçimi</h4>
+                      <p className="text-slate-400 leading-relaxed">
+                        Açılan ekranda 19 resmi Teknopark firmasından kendi şirket ve ofis konumunuzu seçin.
+                      </p>
+                    </div>
+                  </div>
                 </div>
-
-                <button
-                  onClick={handleSimulateQrScan}
-                  className="w-full py-3 rounded-xl bg-brand-600 hover:bg-brand-500 text-white font-bold text-xs shadow-lg transition-all flex items-center justify-center space-x-2"
-                >
-                  <QrCode className="w-4 h-4" />
-                  <span>QR Tara ve Bildirim Formunu Aç</span>
-                </button>
               </div>
 
-              <p className="text-[11px] text-slate-400 text-center italic">
-                QR tarama sonrası konum bilgisi otomatik doldurulmuş form açılır.
-              </p>
+              <button
+                onClick={() => setActiveTab('create-report')}
+                className="w-full py-3.5 rounded-xl bg-brand-600 hover:bg-brand-500 text-white font-bold text-xs shadow-glow-brand transition-all flex items-center justify-center space-x-2"
+              >
+                <FileCheck className="w-4 h-4" />
+                <span>Hemen Arıza Bildirimi Oluştur</span>
+              </button>
             </div>
           </div>
 

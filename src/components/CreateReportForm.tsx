@@ -15,12 +15,19 @@ import {
   ArrowLeft, 
   Image as ImageIcon,
   MessageSquare,
-  FileText
+  FileText,
+  Users,
+  ThumbsUp
 } from 'lucide-react';
-import { ActiveTab, CategoryType, Company, Report } from '../types';
-import { getCompanies, checkDuplicateReport, createReport } from '../services/storage';
+import { ActiveTab, CategoryType, Company, Report, ReportStatus, STATUS_LABELS_TR, CATEGORY_LABELS_TR } from '../types';
+import { 
+  getCompanies, 
+  checkDuplicateReport, 
+  createReport,
+  incrementReportAffectedCount,
+  hasUserVotedForReport
+} from '../services/storage';
 import { compressImageFile } from '../utils/imageCompressor';
-import { STATUS_LABELS_TR, CATEGORY_LABELS_TR } from '../types';
 
 interface CreateReportFormProps {
   setActiveTab: (tab: ActiveTab) => void;
@@ -59,11 +66,15 @@ export const CreateReportForm: React.FC<CreateReportFormProps> = ({
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
-  // Duplicate warning state
+  // Duplicate warning & voting states
   const [duplicateReport, setDuplicateReport] = useState<Report | null>(null);
+  const [dismissedDuplicateId, setDismissedDuplicateId] = useState<string | null>(null);
+  const [voteSuccessMsg, setVoteSuccessMsg] = useState<string | null>(null);
+  const [isVoteSubmitting, setIsVoteSubmitting] = useState<boolean>(false);
 
   // Re-check duplicate whenever company or category changes
   useEffect(() => {
+    setVoteSuccessMsg(null);
     if (selectedCompanyId && category) {
       const existing = checkDuplicateReport(selectedCompanyId, category);
       setDuplicateReport(existing);
@@ -71,6 +82,25 @@ export const CreateReportForm: React.FC<CreateReportFormProps> = ({
       setDuplicateReport(null);
     }
   }, [selectedCompanyId, category]);
+
+  const handleSameIssueClick = () => {
+    if (!duplicateReport) return;
+    setIsVoteSubmitting(true);
+    setErrorMsg(null);
+    setVoteSuccessMsg(null);
+
+    const res = incrementReportAffectedCount(duplicateReport.id);
+    if (res.success) {
+      setVoteSuccessMsg(res.message);
+      setDuplicateReport({
+        ...duplicateReport,
+        affectedCount: res.newCount
+      });
+    } else {
+      setErrorMsg(res.message);
+    }
+    setIsVoteSubmitting(false);
+  };
 
   const selectedCompany = companies.find(c => c.id === selectedCompanyId) || companies[0];
 
@@ -251,6 +281,83 @@ export const CreateReportForm: React.FC<CreateReportFormProps> = ({
             })}
           </div>
         </div>
+
+        {/* Duplicate Active Report Warning Card (Requirements #2 & #3) */}
+        {duplicateReport && dismissedDuplicateId !== duplicateReport.id && (
+          <div className="p-5 rounded-2xl bg-amber-500/10 border-2 border-amber-500/40 text-amber-200 space-y-4 animate-fade-in">
+            <div className="flex items-start space-x-3">
+              <div className="p-2 rounded-xl bg-amber-500/20 text-amber-400 flex-shrink-0 mt-0.5">
+                <AlertTriangle className="w-5 h-5" />
+              </div>
+              <div className="space-y-1 flex-1">
+                <h4 className="font-bold text-amber-300 text-sm">
+                  Bu konumda benzer bir açık bildirim bulunuyor.
+                </h4>
+                <p className="text-xs text-amber-200/90 leading-relaxed">
+                  Seçtiğiniz <strong>{selectedCompany.name} ({selectedCompany.building})</strong> konumunda aynı kategoride kayıtlı aktif bir arıza talebi mevcut.
+                </p>
+              </div>
+            </div>
+
+            {/* Duplicate Details Box */}
+            <div className="p-3.5 rounded-xl bg-slate-950/80 border border-amber-500/20 text-xs space-y-2 font-mono">
+              <div className="flex items-center justify-between text-slate-300">
+                <span className="text-slate-500 font-sans">Takip Kodu:</span>
+                <span className="font-bold text-brand-300">{duplicateReport.trackingCode}</span>
+              </div>
+              <div className="flex items-center justify-between text-slate-300">
+                <span className="text-slate-500 font-sans">Kategori:</span>
+                <span className="text-white font-semibold">{CATEGORY_LABELS_TR[duplicateReport.category as CategoryType] || duplicateReport.category}</span>
+              </div>
+              <div className="flex items-center justify-between text-slate-300">
+                <span className="text-slate-500 font-sans">Bildirim Zamanı:</span>
+                <span>{new Date(duplicateReport.submissionDate).toLocaleString('tr-TR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}</span>
+              </div>
+              <div className="flex items-center justify-between text-slate-300">
+                <span className="text-slate-500 font-sans">Mevcut Durum:</span>
+                <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30 font-sans">
+                  {STATUS_LABELS_TR[duplicateReport.status as ReportStatus] || duplicateReport.status}
+                </span>
+              </div>
+              <div className="flex items-center justify-between pt-1 border-t border-slate-800 text-emerald-400 font-bold font-sans">
+                <span className="text-slate-400">Etkilenen Kullanıcı Sayısı:</span>
+                <span className="flex items-center space-x-1">
+                  <Users className="w-3.5 h-3.5" />
+                  <span>{duplicateReport.affectedCount ?? 1} kişi etkileniyor</span>
+                </span>
+              </div>
+            </div>
+
+            {/* Vote success message */}
+            {voteSuccessMsg && (
+              <div className="p-3 rounded-xl bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 text-xs font-semibold flex items-center space-x-2">
+                <CheckCircle2 className="w-4 h-4 text-emerald-400 flex-shrink-0" />
+                <span>{voteSuccessMsg}</span>
+              </div>
+            )}
+
+            {/* User Choice Action Buttons */}
+            <div className="flex flex-col sm:flex-row items-center gap-2 pt-1">
+              <button
+                type="button"
+                onClick={handleSameIssueClick}
+                disabled={isVoteSubmitting}
+                className="w-full sm:flex-1 py-3 px-4 rounded-xl bg-amber-600 hover:bg-amber-500 text-white font-bold text-xs shadow-md transition-all flex items-center justify-center space-x-2 disabled:opacity-50"
+              >
+                <ThumbsUp className="w-4 h-4" />
+                <span>Ben de aynı sorunu yaşıyorum</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setDismissedDuplicateId(duplicateReport.id)}
+                className="w-full sm:flex-1 py-3 px-4 rounded-xl bg-slate-900 border border-slate-700 text-slate-300 hover:text-white hover:border-slate-600 font-semibold text-xs transition-all flex items-center justify-center space-x-1.5"
+              >
+                <span>Yeni bildirim oluştur</span>
+              </button>
+            </div>
+          </div>
+        )}
 
         {/* Step 3: Issue Description */}
         <div className="space-y-3">

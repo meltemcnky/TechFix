@@ -10,7 +10,8 @@ import {
   ChevronLeft, 
   ChevronRight, 
   ArrowUpDown,
-  Tag
+  Tag,
+  Users
 } from 'lucide-react';
 import { ActiveTab, CategoryType, FilterOptions, Report, ReportPriority, ReportStatus, STATUS_LABELS_TR, PRIORITY_LABELS_TR, CATEGORY_LABELS_TR } from '../types';
 import { getCompanies, SEED_CATEGORIES, getReports } from '../services/storage';
@@ -217,7 +218,15 @@ export const AdminReportList: React.FC<AdminReportListProps> = ({
               </div>
 
               <div>
-                <p className="font-bold text-xs text-slate-200">{report.companyName}</p>
+                <div className="flex items-center justify-between">
+                  <p className="font-bold text-xs text-slate-200">{report.companyName}</p>
+                  {(report.affectedCount ?? 1) > 1 && (
+                    <span className="inline-flex items-center space-x-1 px-2 py-0.5 rounded-full bg-rose-500/20 text-rose-300 border border-rose-500/30 text-[10px] font-bold">
+                      <Users className="w-3 h-3 text-rose-400" />
+                      <span>{report.affectedCount} kişi etkileniyor</span>
+                    </span>
+                  )}
+                </div>
                 <p className="text-[10px] text-slate-400">{report.building} • {report.officeNumber} • {CATEGORY_LABELS_TR[report.category] || report.category}</p>
               </div>
 
@@ -279,8 +288,16 @@ export const AdminReportList: React.FC<AdminReportListProps> = ({
                       <p className="text-[10px] text-slate-400">{report.building} • {report.officeNumber}</p>
                     </td>
 
-                    <td className="py-3.5 px-4 text-slate-300">
-                      {CATEGORY_LABELS_TR[report.category] || report.category}
+                    <td className="py-3.5 px-4">
+                      <div className="flex items-center space-x-2">
+                        <span className="text-slate-300">{CATEGORY_LABELS_TR[report.category] || report.category}</span>
+                        {(report.affectedCount ?? 1) > 1 && (
+                          <span className="px-2 py-0.5 rounded-full bg-rose-500/20 text-rose-300 border border-rose-500/30 text-[10px] font-bold inline-flex items-center space-x-1" title={`${report.affectedCount} kişi etkileniyor`}>
+                            <Users className="w-3 h-3 text-rose-400" />
+                            <span>{report.affectedCount} kişi etkileniyor</span>
+                          </span>
+                        )}
+                      </div>
                     </td>
 
                     <td className="py-3.5 px-4">

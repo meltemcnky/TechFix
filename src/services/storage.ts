@@ -268,20 +268,81 @@ export const getReportByTrackingCode = (code: string): Report | undefined => {
   return reports.find(r => r.trackingCode.trim().toUpperCase() === code.trim().toUpperCase());
 };
 
-// Check for recent duplicate report for same company and category within 2 hours
+// Check for active duplicate report for same company/office location and category
 export const checkDuplicateReport = (companyId: string, category: CategoryType): Report | null => {
   const reports = getReports();
-  const now = new Date().getTime();
-  const twoHoursMs = 2 * 60 * 60 * 1000;
 
   const duplicate = reports.find(r => {
     if (r.companyId !== companyId || r.category !== category) return false;
+    // Resolved and Archived reports are NOT duplicates
     if (r.status === 'Resolved' || r.status === 'Archived') return false;
-    const subTime = new Date(r.submissionDate).getTime();
-    return (now - subTime) < twoHoursMs;
+    return true;
   });
 
   return duplicate || null;
+};
+
+// Check if current device has already voted for an affected report
+export const hasUserVotedForReport = (reportId: string): boolean => {
+  try {
+    const votes = JSON.parse(localStorage.getItem('techfix_upvoted_reports') || '[]');
+    return Array.isArray(votes) && votes.includes(reportId);
+  } catch {
+    return false;
+  }
+};
+
+// Increment affectedCount for an existing active report ("Ben de aynı sorunu yaşıyorum")
+export const incrementReportAffectedCount = (reportId: string): {
+  success: boolean;
+  newCount: number;
+  message: string;
+  alreadyVoted?: boolean;
+} => {
+  const reports = getReports();
+  const reportIndex = reports.findIndex(r => r.id === reportId);
+
+  if (reportIndex === -1) {
+    return { success: false, newCount: 1, message: 'Bildirim kaydı bulunamadı.' };
+  }
+
+  const report = reports[reportIndex];
+  const currentCount = report.affectedCount ?? 1;
+
+  if (hasUserVotedForReport(reportId)) {
+    return {
+      success: false,
+      newCount: currentCount,
+      message: 'Bu bildirim için zaten etkilendiğinizi belirttiniz.',
+      alreadyVoted: true
+    };
+  }
+
+  const newCount = currentCount + 1;
+  reports[reportIndex] = {
+    ...report,
+    affectedCount: newCount,
+    lastUpdatedDate: new Date().toISOString()
+  };
+
+  localStorage.setItem(STORAGE_KEYS.REPORTS, JSON.stringify(reports));
+
+  // Store device vote token to prevent duplicate clicks from same device
+  try {
+    const votes = JSON.parse(localStorage.getItem('techfix_upvoted_reports') || '[]');
+    if (!votes.includes(reportId)) {
+      votes.push(reportId);
+      localStorage.setItem('techfix_upvoted_reports', JSON.stringify(votes));
+    }
+  } catch (err) {
+    console.error('Failed to store device vote:', err);
+  }
+
+  return {
+    success: true,
+    newCount,
+    message: 'Teşekkürler. Bu sorundan etkilendiğiniz kaydedildi.'
+  };
 };
 
 export const createReport = (data: {
@@ -310,6 +371,7 @@ export const createReport = (data: {
     photos: data.photos,
     status: 'New',
     priority: 'Medium',
+    affectedCount: 1,
     submissionDate: now,
     lastUpdatedDate: now,
     timeline: [
