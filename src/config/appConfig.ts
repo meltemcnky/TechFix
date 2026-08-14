@@ -42,6 +42,12 @@ export const getAppUrlConfig = (): AppUrlConfig => {
     }
   }
 
+  // Auto-detect if running directly on the custom domain (techfix.medeniyetteknopark.com)
+  if (typeof window !== 'undefined' && window.location.hostname.includes('medeniyetteknopark.com')) {
+    productionUrl = window.location.origin;
+    isProductionConfigured = true;
+  }
+
   const activeUrl = isProductionConfigured ? productionUrl! : devFallback;
   const isLocalhost = isLocalhostUrl(activeUrl);
 
