@@ -19,6 +19,15 @@ The linked Supabase DEV project has the server-only `ALLOWED_ORIGINS` and
 `company-credentials` and `technician-access`. Secret values and local
 environment files are intentionally not recorded in Git.
 
+## Technician QR operation
+
+TechFix does not generate QR images, PDFs, or simulator output in the web
+application. The single physical QR is prepared outside the application and
+contains `/tekniker#token=<server-generated-token>` on the approved production
+origin. A valid token is exchanged by `technician-access` for a short-lived,
+meter-submit-only grant; the token is never stored in the frontend bundle or a
+`VITE_*` variable. Opening `/tekniker` without the QR uses the fallback PIN.
+
 ## Environments
 
 Vercel Preview may use the personal Supabase FREE project. Vercel Production
