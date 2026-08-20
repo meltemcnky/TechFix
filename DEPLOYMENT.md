@@ -8,6 +8,17 @@
 
 No application server, Docker runtime, or local Supabase stack is required.
 
+## Current DEV deployment status
+
+As of 2026-08-20, the Vercel Production deployment is live and reports
+`Ready`. Vercel has the public `VITE_SUPABASE_URL` and
+`VITE_SUPABASE_ANON_KEY` build variables configured.
+
+The linked Supabase DEV project has the server-only `ALLOWED_ORIGINS` and
+`TECHNICIAN_GRANT_SECRET` secrets configured. The active Edge Functions are
+`company-credentials` and `technician-access`. Secret values and local
+environment files are intentionally not recorded in Git.
+
 ## Environments
 
 Vercel Preview may use the personal Supabase FREE project. Vercel Production
