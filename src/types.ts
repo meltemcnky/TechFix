@@ -1,0 +1,21 @@
+export type Role = 'guest' | 'company' | 'admin';
+export type Company = {
+  id: string; name: string; block: string | null; floor: string | null; office_code: string | null;
+  logo_path: string | null; is_active: boolean; auth_user_id?: string | null;
+};
+export type Category = { id: string; code: string; name: string; is_active: boolean; sort_order: number };
+export type TicketStatus = 'new' | 'under_review' | 'in_progress' | 'resolved' | 'archived';
+export type Ticket = {
+  id: string; company_id: string; category_id: string; title: string; description: string; photo_path: string | null;
+  status: TicketStatus; admin_public_note: string | null; created_at: string; updated_at: string; resolved_at: string | null;
+  companies?: Pick<Company, 'name' | 'block' | 'floor' | 'office_code'> | null; categories?: Pick<Category, 'name'> | null;
+};
+export type Notification = {
+  id: string; audience: 'admin' | 'company'; company_id: string; ticket_id: string | null;
+  type: 'ticket_updated' | 'pin_request'; title: string; message: string; read_at: string | null; created_at: string;
+  companies?: Pick<Company, 'name'> | null;
+};
+export type MeterReading = {
+  id: string; meter_type: 'electricity' | 'natural_gas'; photo_path: string; reading_value: number | null;
+  notes: string | null; access_method: 'qr' | 'pin'; created_at: string;
+};

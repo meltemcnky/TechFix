@@ -1,211 +1,148 @@
-import React, { useState, useEffect } from 'react';
-import { ActiveTab, Company, Report } from './types';
-import { Header } from './components/Header';
-import { Footer } from './components/Footer';
-import { WelcomeScreen } from './components/WelcomeScreen';
-import { CreateReportForm } from './components/CreateReportForm';
-import { SuccessScreen } from './components/SuccessScreen';
-import { ReportTracking } from './components/ReportTracking';
-import { MeterUploadForm } from './components/MeterUploadForm';
-import { AdminLoginModal } from './components/AdminLoginModal';
-import { AdminDashboard } from './components/AdminDashboard';
-import { AdminReportList } from './components/AdminReportList';
-import { AdminReportDetailModal } from './components/AdminReportDetailModal';
-import { AdminMeterManagement } from './components/AdminMeterManagement';
-import { AdminSettings } from './components/AdminSettings';
-import { AdminQrManagement } from './components/AdminQrManagement';
-import { ErrorPages } from './components/ErrorPages';
-import { initializeStorage } from './services/storage';
-import { isAuthenticatedAdmin, logoutAdmin } from './services/authService';
+import { FormEvent, ReactNode, useEffect, useMemo, useState } from 'react';
+import type { Session } from '@supabase/supabase-js';
+import { BarChart3, Bell, Building2, FileText, Gauge, LogOut, Plus, RefreshCw, Wrench } from 'lucide-react';
+import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
+import { invoke, isSupabaseConfigured, supabase } from './services/supabase';
+import { toWebp } from './utils/imageCompressor';
+import type { Category, Company, MeterReading, Notification, Role, Ticket, TicketStatus } from './types';
 
-export const App: React.FC = () => {
-  const [activeTab, setActiveTab] = useState<ActiveTab>('welcome');
-  const [isAdminLoggedIn, setIsAdminLoggedIn] = useState<boolean>(() => isAuthenticatedAdmin());
-  const [isAdminLoginModalOpen, setIsAdminLoginModalOpen] = useState<boolean>(false);
-  
-  // Cross-screen payload states
-  const [preselectedCompany, setPreselectedCompany] = useState<Company | null>(null);
-  const [createdReport, setCreatedReport] = useState<Report | null>(null);
-  const [trackingCodeSearch, setTrackingCodeSearch] = useState<string>('');
-  const [selectedReportDetail, setSelectedReportDetail] = useState<Report | null>(null);
+const field = 'w-full rounded-xl border border-slate-700 bg-slate-950/70 px-4 py-3 text-sm outline-none focus:border-sky-500';
+const primary = 'rounded-xl bg-sky-600 px-5 py-3 text-sm font-bold text-white hover:bg-sky-500 disabled:opacity-50';
+const panel = 'glass-card rounded-2xl border border-slate-800 p-5';
+const statusLabels: Record<TicketStatus, string> = { new: 'Yeni', under_review: 'İnceleniyor', in_progress: 'İşlemde', resolved: 'Çözüldü', archived: 'Arşivlendi' };
+const err = (value: unknown) => value instanceof Error ? value.message : 'Beklenmeyen bir hata oluştu.';
 
+function useRoute() {
+  const [path, setPath] = useState(location.pathname);
+  useEffect(() => { const listener = () => setPath(location.pathname); addEventListener('popstate', listener); return () => removeEventListener('popstate', listener); }, []);
+  return { path, go: (next: string) => { history.pushState({}, '', next); setPath(next); scrollTo(0, 0); } };
+}
+
+export default function App() {
+  const { path, go } = useRoute();
+  const [session, setSession] = useState<Session | null>(null);
+  const [role, setRole] = useState<Role>('guest');
+  const [company, setCompany] = useState<Company | null>(null);
+  const [loading, setLoading] = useState(true);
   useEffect(() => {
-    initializeStorage();
-    setIsAdminLoggedIn(isAuthenticatedAdmin());
-
-    // Check if user scanned universal QR code URL (?action=create-report)
-    if (typeof window !== 'undefined') {
-      const params = new URLSearchParams(window.location.search);
-      if (params.get('action') === 'create-report') {
-        setActiveTab('create-report');
-      }
-    }
+    const classify = async (current: Session | null) => {
+      setSession(current);
+      if (!current) { setRole('guest'); setCompany(null); setLoading(false); return; }
+      const [{ data: admin }, { data: firm }] = await Promise.all([
+        supabase.from('admin_users').select('user_id,is_active').eq('user_id', current.user.id).maybeSingle(),
+        supabase.from('companies').select('id,name,block,floor,office_code,logo_path,is_active').eq('auth_user_id', current.user.id).maybeSingle(),
+      ]);
+      if (admin?.is_active) setRole('admin');
+      else if (firm?.is_active) { setRole('company'); setCompany(firm); }
+      else { await supabase.auth.signOut(); setRole('guest'); setCompany(null); }
+      setLoading(false);
+    };
+    void supabase.auth.getSession().then(({ data }) => classify(data.session));
+    const { data } = supabase.auth.onAuthStateChange((_event, current) => void classify(current));
+    return () => data.subscription.unsubscribe();
   }, []);
+  useEffect(() => {
+    if (loading) return;
+    if (path === '/') go(role === 'admin' ? '/admin/dashboard' : role === 'company' ? '/firma' : '/giris');
+    else if (path.startsWith('/admin') && role !== 'admin') go('/giris');
+    else if (path.startsWith('/firma') && role !== 'company') go('/giris');
+  }, [loading, path, role]);
+  if (!isSupabaseConfigured) return <Shell><Empty text="Supabase ortam değişkenleri tanımlanmalıdır."/></Shell>;
+  if (loading) return <Shell><Empty text="Oturum kontrol ediliyor…"/></Shell>;
+  if (path.startsWith('/tekniker')) return <Shell><Technician/></Shell>;
+  if (role === 'guest') return <Shell><Login go={go}/></Shell>;
+  return <Shell role={role} go={go} onLogout={() => void supabase.auth.signOut().then(() => go('/giris'))}>
+    {role === 'company' && company ? <CompanyArea path={path} go={go} company={company}/> : null}
+    {role === 'admin' ? <AdminArea path={path} go={go}/> : null}
+  </Shell>;
+}
 
-  // Protect Admin tabs if not authenticated & handle smooth routing
-  const handleTabChange = (tab: ActiveTab) => {
-    if (tab.startsWith('admin-')) {
-      if (!isAuthenticatedAdmin()) {
-        setIsAdminLoggedIn(false);
-        setIsAdminLoginModalOpen(true);
-        return;
-      }
-      setIsAdminLoggedIn(true);
-    }
+function Shell({ children, role, go, onLogout }: { children: ReactNode; role?: Role; go?: (path: string) => void; onLogout?: () => void }) {
+  const nav = role === 'company'
+    ? [['/firma','Ana Sayfa'],['/firma/ariza-bildir','Arıza Bildir'],['/firma/talepler','Taleplerim'],['/firma/bildirimler','Bildirimler']]
+    : [['/admin/dashboard','Dashboard'],['/admin/talepler','Talepler'],['/admin/sayaclar','Sayaçlar'],['/admin/firmalar','Firmalar'],['/admin/kategoriler','Kategoriler'],['/admin/bildirimler','Bildirimler']];
+  return <div className="min-h-screen bg-[#0B0F17] text-slate-100"><header className="sticky top-0 z-40 border-b border-slate-800 bg-[#0B0F17]/95 backdrop-blur-xl"><div className="mx-auto flex min-h-16 max-w-7xl flex-wrap items-center justify-between gap-3 px-4 py-3"><button className="flex items-center gap-3 text-left" onClick={() => go?.(role === 'admin' ? '/admin/dashboard' : '/firma')}><span className="gradient-accent flex h-10 w-10 items-center justify-center rounded-xl"><Building2/></span><span><b className="text-xl">TechFix</b><small className="block text-slate-400">Medeniyet Teknopark</small></span></button>{role && go ? <nav className="flex flex-wrap items-center gap-1 text-sm">{nav.map(([href,label]) => <button className="rounded-lg px-3 py-2 hover:bg-slate-800" key={href} onClick={() => go(href)}>{label}</button>)}<button aria-label="Çıkış" className="rounded-lg border border-slate-700 p-2" onClick={onLogout}><LogOut size={18}/></button></nav> : null}</div></header><main className="mx-auto max-w-7xl px-4 py-8">{children}</main></div>;
+}
+function Empty({ text }: { text: string }) { return <div className={`${panel} mx-auto max-w-xl text-center text-slate-300`}>{text}</div>; }
+function ErrorMessage({ text }: { text: string }) { return text ? <p className="rounded-xl border border-rose-800 bg-rose-950/40 p-3 text-sm text-rose-300">{text}</p> : null; }
+function PhotoButton({ bucket, path }: { bucket:'ticket-photos'|'meter-photos'; path:string }) { const openPhoto=async()=>{const {data}=await supabase.storage.from(bucket).createSignedUrl(path,60);if(data?.signedUrl)open(data.signedUrl,'_blank','noopener,noreferrer');};return <button type="button" className="mt-3 rounded-lg bg-slate-700 px-3 py-2 text-xs" onClick={()=>void openPhoto()}>Fotoğrafı aç</button>; }
 
-    setActiveTab(tab);
-
-    // Clean URL query param when user navigates away from create-report
-    if (typeof window !== 'undefined' && window.history.pushState) {
-      if (tab !== 'create-report') {
-        const url = new URL(window.location.href);
-        if (url.searchParams.has('action')) {
-          url.searchParams.delete('action');
-          window.history.pushState({}, '', url.pathname + url.search);
-        }
-      }
-    }
-
-    window.scrollTo({ top: 0, behavior: 'smooth' });
+function Login({ go }: { go: (path: string) => void }) {
+  const [mode, setMode] = useState<'company'|'admin'|'reset'>('company'); const [busy, setBusy] = useState(false); const [error, setError] = useState(''); const [message, setMessage] = useState('');
+  const submit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault(); setBusy(true); setError(''); setMessage(''); const form = new FormData(event.currentTarget);
+    try {
+      if (mode === 'company') { const result = await invoke<{ session: Session }>('company-credentials', { body: { action:'login', companyName:form.get('companyName'), pin:form.get('pin') } }); await supabase.auth.setSession({ access_token:result.session.access_token, refresh_token:result.session.refresh_token }); go('/firma'); }
+      else if (mode === 'admin') { const { error: authError } = await supabase.auth.signInWithPassword({ email:String(form.get('email')), password:String(form.get('password')) }); if (authError) throw new Error('E-posta veya parola hatalı.'); go('/admin/dashboard'); }
+      else { const result = await invoke<{ message:string }>('company-credentials', { body:{ action:'request-reset', companyName:form.get('companyName') } }); setMessage(result.message); }
+    } catch (cause) { setError(err(cause)); } finally { setBusy(false); }
   };
+  return <div className="mx-auto max-w-md space-y-4"><div className="grid grid-cols-3 rounded-xl border border-slate-800 bg-slate-900 p-1 text-sm">{([['company','Firma'],['admin','Admin'],['reset','Şifre Talebi']] as const).map(([value,label]) => <button className={`rounded-lg p-2 ${mode === value ? 'bg-sky-600' : ''}`} key={value} onClick={() => setMode(value)}>{label}</button>)}</div><form className={`${panel} space-y-4`} onSubmit={submit}><h1 className="text-2xl font-bold">{mode === 'admin' ? 'Yönetici Girişi' : mode === 'reset' ? 'Yönetimden Şifre Talep Et' : 'Firma Girişi'}</h1>{mode === 'admin' ? <><input className={field} name="email" type="email" placeholder="E-posta" required/><input className={field} name="password" type="password" placeholder="Güçlü parola" required/></> : <input className={field} name="companyName" placeholder="Firma adı" required/>}{mode === 'company' ? <input className={field} name="pin" type="password" inputMode="numeric" pattern="[0-9]{6,8}" minLength={6} maxLength={8} placeholder="6–8 haneli PIN" required/> : null}<ErrorMessage text={error}/>{message ? <p className="text-sm text-emerald-400">{message}</p> : null}<button className={`${primary} w-full`} disabled={busy}>{busy ? 'İşleniyor…' : mode === 'reset' ? 'Talep oluştur' : 'Giriş yap'}</button></form></div>;
+}
 
-  const handleAdminLoginSuccess = () => {
-    setIsAdminLoggedIn(true);
-    setActiveTab('admin-dashboard');
-  };
+function CompanyArea({ path, go, company }: { path:string; go:(path:string)=>void; company:Company }) {
+  if (path === '/firma/ariza-bildir') return <TicketCreate company={company} onDone={() => go('/firma/talepler')}/>;
+  if (path === '/firma/bildirimler') return <Notifications audience="company"/>;
+  if (path === '/firma/talepler') return <><h1 className="mb-6 text-3xl font-bold">Taleplerim</h1><TicketList companyId={company.id}/></>;
+  return <CompanyHome company={company} go={go}/>;
+}
+function CompanyHome({ company, go }: { company:Company; go:(path:string)=>void }) {
+  const [tickets, setTickets] = useState<Ticket[]>([]);
+  useEffect(() => { void supabase.from('tickets').select('*').order('created_at',{ascending:false}).then(({data}) => setTickets((data as Ticket[])??[])); }, []);
+  const values = useMemo(() => ({ open:tickets.filter(x=>['new','under_review'].includes(x.status)).length, progress:tickets.filter(x=>x.status==='in_progress').length, done:tickets.filter(x=>x.status==='resolved').length }), [tickets]);
+  return <div className="space-y-6"><div className="flex flex-wrap justify-between gap-4"><div><p className="text-sky-400">Firma Paneli</p><h1 className="text-3xl font-bold">{company.name}</h1><p className="text-slate-400">{[company.block,company.floor,company.office_code].filter(Boolean).join(' / ')}</p></div><button className={primary} onClick={()=>go('/firma/ariza-bildir')}><Plus className="mr-2 inline" size={18}/>Arıza bildir</button></div><div className="grid gap-3 sm:grid-cols-3">{Object.entries({Açık:values.open,İşlemde:values.progress,Çözülen:values.done}).map(([label,value])=><div className={panel} key={label}><p className="text-slate-400">{label}</p><b className="text-3xl">{value}</b></div>)}</div><TicketList companyId={company.id} limit={5}/></div>;
+}
+function TicketCreate({ company, onDone }: { company:Company; onDone:()=>void }) {
+  const [categories,setCategories]=useState<Category[]>([]); const [busy,setBusy]=useState(false); const [error,setError]=useState('');
+  useEffect(()=>{ void supabase.from('categories').select('*').eq('is_active',true).order('sort_order').then(({data})=>setCategories((data as Category[])??[])); },[]);
+  const submit=async(event:FormEvent<HTMLFormElement>)=>{ event.preventDefault(); setBusy(true); setError(''); const form=new FormData(event.currentTarget); const id=crypto.randomUUID(); let path:string|null=null; try { const {data:{user}}=await supabase.auth.getUser(); if(!user) throw new Error('Oturum bulunamadı.'); const photo=form.get('photo'); if(photo instanceof File&&photo.size){ const webp=await toWebp(photo); path=`${company.id}/${id}/${webp.name}`; const {error:uploadError}=await supabase.storage.from('ticket-photos').upload(path,webp,{contentType:'image/webp',upsert:false}); if(uploadError) throw uploadError; } const {error:insertError}=await supabase.from('tickets').insert({id,company_id:company.id,category_id:form.get('categoryId'),title:form.get('title'),description:form.get('description'),photo_path:path,created_by:user.id}); if(insertError) throw insertError; onDone(); } catch(cause){ if(path) await supabase.storage.from('ticket-photos').remove([path]); setError(err(cause)); } finally{setBusy(false);} };
+  return <form className={`${panel} mx-auto max-w-2xl space-y-4`} onSubmit={submit}><h1 className="text-2xl font-bold">Yeni Arıza Bildirimi</h1><select className={field} name="categoryId" required defaultValue=""><option value="" disabled>Kategori seçin</option>{categories.map(x=><option key={x.id} value={x.id}>{x.name}</option>)}</select><input className={field} name="title" minLength={3} maxLength={160} placeholder="Başlık" required/><textarea className={field} name="description" minLength={10} maxLength={5000} rows={6} placeholder="Arızayı açıklayın" required/><label className="block text-sm">Fotoğraf (opsiyonel)<input className={`${field} mt-2`} name="photo" type="file" accept="image/jpeg,image/png,image/webp"/></label><ErrorMessage text={error}/><button className={primary} disabled={busy}>{busy?'Gönderiliyor…':'Talebi oluştur'}</button></form>;
+}
+function TicketList({companyId,limit}:{companyId?:string;limit?:number}){
+  const [rows,setRows]=useState<Ticket[]>([]); const [error,setError]=useState('');
+  useEffect(()=>{ let query=supabase.from('tickets').select('*,categories(name),companies(name,block,floor,office_code)').order('created_at',{ascending:false}); if(companyId) query=query.eq('company_id',companyId); if(limit) query=query.limit(limit); void query.then(({data,error:loadError})=>{setRows((data as Ticket[])??[]);if(loadError)setError(loadError.message);}); },[companyId,limit]);
+  return <div className="space-y-3"><ErrorMessage text={error}/>{rows.map(ticket=><div className={panel} key={ticket.id}><div className="flex flex-wrap justify-between gap-2"><div><p className="text-xs text-sky-400">{ticket.categories?.name}{ticket.companies?.name?` · ${ticket.companies.name}`:''}</p><h3 className="text-lg font-semibold">{ticket.title}</h3></div><span className="h-fit rounded-full bg-slate-800 px-3 py-1 text-xs">{statusLabels[ticket.status]}</span></div><p className="mt-3 whitespace-pre-wrap text-sm text-slate-300">{ticket.description}</p>{ticket.photo_path?<PhotoButton bucket="ticket-photos" path={ticket.photo_path}/>:null}{ticket.admin_public_note?<p className="mt-3 rounded-xl bg-sky-950/40 p-3 text-sm"><b>Yönetim notu:</b> {ticket.admin_public_note}</p>:null}<p className="mt-3 text-xs text-slate-500">{new Date(ticket.created_at).toLocaleString('tr-TR')}</p></div>)}{!rows.length&&<Empty text="Kayıt bulunamadı."/>}</div>;
+}
+function Notifications({audience}:{audience:'admin'|'company'}){
+  const [rows,setRows]=useState<Notification[]>([]); const load=()=>void supabase.from('notifications').select('*,companies(name)').eq('audience',audience).order('created_at',{ascending:false}).then(({data})=>setRows((data as Notification[])??[])); useEffect(load,[audience]);
+  const read=async(id:string)=>{await supabase.rpc('mark_notification_read',{notification_id:id});load();};
+  return <div className="space-y-3"><h1 className="mb-6 text-3xl font-bold">Bildirimler</h1>{rows.map(item=><button className={`${panel} w-full text-left ${item.read_at?'opacity-60':''}`} key={item.id} onClick={()=>void read(item.id)}><div className="flex gap-3"><Bell className="text-sky-400"/><div><b>{item.title}</b>{item.companies?.name?<span className="ml-2 text-sm text-sky-400">{item.companies.name}</span>:null}<p className="text-sm text-slate-300">{item.message}</p><small className="text-slate-500">{new Date(item.created_at).toLocaleString('tr-TR')}</small></div></div></button>)}{!rows.length&&<Empty text="Bildirim bulunmuyor."/>}</div>;
+}
 
-  const handleAdminLogout = () => {
-    logoutAdmin();
-    setIsAdminLoggedIn(false);
-    setActiveTab('welcome');
-  };
+function AdminArea({path,go}:{path:string;go:(path:string)=>void}){ if(path==='/admin/talepler')return <AdminTickets/>; if(path==='/admin/sayaclar')return <AdminMeters/>; if(path==='/admin/firmalar')return <AdminCompanies/>; if(path==='/admin/kategoriler')return <AdminCategories/>; if(path==='/admin/bildirimler')return <><Notifications audience="admin"/><div className="mt-8"><TechnicianSettings/></div></>; return <AdminDashboard go={go}/>; }
+function AdminDashboard({go}:{go:(path:string)=>void}){
+  const [tickets,setTickets]=useState<Ticket[]>([]); const [companies,setCompanies]=useState(0); const [meters,setMeters]=useState(0);
+  useEffect(()=>{void Promise.all([supabase.from('tickets').select('*'),supabase.from('companies').select('*',{count:'exact',head:true}).eq('is_active',true),supabase.from('meter_readings').select('*',{count:'exact',head:true})]).then(([t,c,m])=>{setTickets((t.data as Ticket[])??[]);setCompanies(c.count??0);setMeters(m.count??0);});},[]);
+  const data=Object.entries(statusLabels).map(([status,label])=>({status:label,adet:tickets.filter(x=>x.status===status).length}));
+  const metrics:[typeof FileText,string,number,string][]=[[FileText,'Talepler',tickets.length,'/admin/talepler'],[Building2,'Aktif Firmalar',companies,'/admin/firmalar'],[Gauge,'Sayaçlar',meters,'/admin/sayaclar']];
+  return <div className="space-y-6"><h1 className="text-3xl font-bold">Yönetim Dashboard</h1><div className="grid gap-3 sm:grid-cols-3">{metrics.map(([Icon,label,value,path])=><button className={`${panel} text-left`} key={label} onClick={()=>go(path)}><Icon className="text-sky-400"/><p className="mt-3 text-slate-400">{label}</p><b className="text-3xl">{value}</b></button>)}</div><div className={panel}><h2 className="mb-4 flex items-center gap-2 font-bold"><BarChart3/>Talep Durumları</h2><div className="h-72"><ResponsiveContainer><BarChart data={data}><CartesianGrid strokeDasharray="3 3" stroke="#334155"/><XAxis dataKey="status" stroke="#94a3b8"/><YAxis allowDecimals={false} stroke="#94a3b8"/><Tooltip/><Bar dataKey="adet" fill="#0284c7" radius={[6,6,0,0]}/></BarChart></ResponsiveContainer></div></div></div>;
+}
+function AdminTickets(){
+  const [rows,setRows]=useState<Ticket[]>([]); const [status,setStatus]=useState(''); const [company,setCompany]=useState(''); const [category,setCategory]=useState(''); const [date,setDate]=useState(''); const [companies,setCompanies]=useState<Company[]>([]); const [categories,setCategories]=useState<Category[]>([]);
+  const load=()=>{let query=supabase.from('tickets').select('*,categories(name),companies(name,block,floor,office_code)').order('created_at',{ascending:false});if(status)query=query.eq('status',status);if(company)query=query.eq('company_id',company);if(category)query=query.eq('category_id',category);if(date)query=query.gte('created_at',`${date}T00:00:00`).lt('created_at',`${date}T23:59:59.999`);void query.then(({data})=>setRows((data as Ticket[])??[]));};
+  useEffect(()=>{load();void Promise.all([supabase.from('companies').select('*').order('name'),supabase.from('categories').select('*').order('sort_order')]).then(([c,k])=>{setCompanies((c.data as Company[])??[]);setCategories((k.data as Category[])??[]);});},[status,company,category,date]);
+  const update=async(event:FormEvent<HTMLFormElement>,id:string)=>{event.preventDefault();const data=new FormData(event.currentTarget);const next=String(data.get('status')) as TicketStatus;const {error}=await supabase.from('tickets').update({status:next,admin_public_note:String(data.get('note')??'')||null,resolved_at:next==='resolved'?new Date().toISOString():null}).eq('id',id);if(!error)load();};
+  const exportCsv=()=>{const esc=(v:unknown)=>`"${String(v??'').replace(/"/g,'""')}"`;const csv=[['Firma','Kategori','Başlık','Durum','Tarih'],...rows.map(x=>[x.companies?.name,x.categories?.name,x.title,statusLabels[x.status],x.created_at])].map(r=>r.map(esc).join(',')).join('\n');const url=URL.createObjectURL(new Blob(['\uFEFF'+csv],{type:'text/csv;charset=utf-8'}));const a=document.createElement('a');a.href=url;a.download=`techfix-talepler-${new Date().toISOString().slice(0,10)}.csv`;a.click();URL.revokeObjectURL(url);};
+  return <div className="space-y-4"><div className="flex flex-wrap items-center justify-between gap-3"><h1 className="text-3xl font-bold">Talepler</h1><button className={primary} onClick={exportCsv}>CSV dışa aktar</button></div><div className="grid gap-3 md:grid-cols-4"><select className={field} value={company} onChange={e=>setCompany(e.target.value)}><option value="">Tüm firmalar</option>{companies.map(x=><option value={x.id} key={x.id}>{x.name}</option>)}</select><select className={field} value={category} onChange={e=>setCategory(e.target.value)}><option value="">Tüm kategoriler</option>{categories.map(x=><option value={x.id} key={x.id}>{x.name}</option>)}</select><select className={field} value={status} onChange={e=>setStatus(e.target.value)}><option value="">Tüm durumlar</option>{Object.entries(statusLabels).map(([v,l])=><option value={v} key={v}>{l}</option>)}</select><input className={field} type="date" value={date} onChange={e=>setDate(e.target.value)}/></div>{rows.map(ticket=><form className={`${panel} space-y-3`} key={ticket.id} onSubmit={e=>void update(e,ticket.id)}><div><p className="text-xs text-sky-400">{ticket.companies?.name} · {ticket.categories?.name}</p><h2 className="text-lg font-bold">{ticket.title}</h2><p className="mt-2 text-sm text-slate-300">{ticket.description}</p>{ticket.photo_path?<PhotoButton bucket="ticket-photos" path={ticket.photo_path}/>:null}</div><div className="grid gap-3 md:grid-cols-[220px_1fr_auto]"><select className={field} name="status" defaultValue={ticket.status}>{Object.entries(statusLabels).map(([v,l])=><option value={v} key={v}>{l}</option>)}</select><input className={field} name="note" defaultValue={ticket.admin_public_note??''} placeholder="Firmaya görünür not" maxLength={3000}/><button className={primary}>Güncelle</button></div></form>)}</div>;
+}
+function AdminCategories(){const [rows,setRows]=useState<Category[]>([]);const [error,setError]=useState('');const load=()=>void supabase.from('categories').select('*').order('sort_order').then(({data})=>setRows((data as Category[])??[]));useEffect(load,[]);const save=async(event:FormEvent<HTMLFormElement>,id?:string)=>{event.preventDefault();setError('');const data=new FormData(event.currentTarget);const values={code:String(data.get('code')).trim().toLowerCase().replace(/[^a-z0-9]+/g,'_').replace(/^_|_$/g,''),name:String(data.get('name')).trim(),sort_order:Number(data.get('sortOrder')),is_active:data.get('active')==='on'};const result=id?await supabase.from('categories').update(values).eq('id',id):await supabase.from('categories').insert(values);if(result.error)setError(result.error.message);else{if(!id)event.currentTarget.reset();load();}};return <div className="grid gap-6 lg:grid-cols-[320px_1fr]"><form className={`${panel} h-fit space-y-3`} onSubmit={e=>void save(e)}><h1 className="text-xl font-bold">Yeni Kategori</h1><input className={field} name="code" placeholder="Kod" required/><input className={field} name="name" placeholder="Ad" required/><input className={field} name="sortOrder" type="number" defaultValue="100" required/><label className="flex gap-2 text-sm"><input name="active" type="checkbox" defaultChecked/>Aktif</label><button className={primary}>Ekle</button><ErrorMessage text={error}/></form><div className="space-y-3">{rows.map(x=><form className={`${panel} grid gap-2 md:grid-cols-[1fr_1fr_100px_auto_auto]`} key={x.id} onSubmit={e=>void save(e,x.id)}><input className={field} name="code" defaultValue={x.code} required/><input className={field} name="name" defaultValue={x.name} required/><input className={field} name="sortOrder" type="number" defaultValue={x.sort_order} required/><label className="flex items-center gap-2 text-sm"><input name="active" type="checkbox" defaultChecked={x.is_active}/>Aktif</label><button className={primary}>Kaydet</button></form>)}</div></div>;}
+function AdminCompanies(){
+  const [rows,setRows]=useState<Company[]>([]); const [pin,setPin]=useState(''); const [error,setError]=useState(''); const load=()=>void supabase.from('companies').select('*').order('name').then(({data})=>setRows((data as Company[])??[])); useEffect(load,[]);
+  const create=async(event:FormEvent<HTMLFormElement>)=>{event.preventDefault();setError('');const form=event.currentTarget;const data=new FormData(form);try{const result=await invoke<{pin:string}>('company-credentials',{body:{action:'create',name:data.get('name'),block:data.get('block'),floor:data.get('floor'),officeCode:data.get('officeCode'),pinLength:Number(data.get('pinLength'))}});setPin(result.pin);form.reset();load();}catch(cause){setError(err(cause));}};
+  const action=async(companyId:string,name:'reset'|'set-active',isActive?:boolean)=>{try{const result=await invoke<{pin?:string}>('company-credentials',{body:{action:name,companyId,isActive,pinLength:6}});if(result.pin)setPin(result.pin);load();}catch(cause){setError(err(cause));}};
+  const updateCompany=async(event:FormEvent<HTMLFormElement>,company:Company)=>{event.preventDefault();setError('');const data=new FormData(event.currentTarget);let logoPath=company.logo_path;try{const logo=data.get('logo');if(logo instanceof File&&logo.size){const webp=await toWebp(logo,{maxDimension:800,maxBytes:2*1024*1024});logoPath=`${company.id}/${webp.name}`;const {error:uploadError}=await supabase.storage.from('company-logos').upload(logoPath,webp,{contentType:'image/webp'});if(uploadError)throw uploadError;}const {error:updateError}=await supabase.from('companies').update({name:String(data.get('name')).trim(),normalized_name:String(data.get('name')).trim().replace(/\s+/g,' ').toLowerCase(),block:String(data.get('block')).trim(),floor:String(data.get('floor')).trim(),office_code:String(data.get('officeCode')).trim(),logo_path:logoPath}).eq('id',company.id);if(updateError)throw updateError;load();}catch(cause){setError(err(cause));}};
+  return <div className="grid gap-6 lg:grid-cols-[360px_1fr]"><form className={`${panel} h-fit space-y-3`} onSubmit={create}><h1 className="text-xl font-bold">Yeni Firma</h1>{[['name','Firma adı'],['block','Blok'],['floor','Kat'],['officeCode','Ofis / kod']].map(([name,placeholder])=><input className={field} name={name} placeholder={placeholder} required key={name}/>) }<select className={field} name="pinLength" defaultValue="6"><option value="6">6 haneli PIN</option><option value="7">7 haneli PIN</option><option value="8">8 haneli PIN</option></select><button className={`${primary} w-full`}>Firma oluştur</button>{pin?<div className="rounded-xl border border-emerald-700 bg-emerald-950/40 p-4"><small>Yalnızca şimdi gösterilir:</small><p className="text-3xl font-bold tracking-widest">{pin}</p></div>:null}<ErrorMessage text={error}/></form><div className="space-y-3">{rows.map(x=><form className={`${panel} space-y-3`} key={x.id} onSubmit={e=>void updateCompany(e,x)}><div className="grid gap-2 sm:grid-cols-2"><input className={field} name="name" defaultValue={x.name} required/><input className={field} name="block" defaultValue={x.block??''} placeholder="Blok" required/><input className={field} name="floor" defaultValue={x.floor??''} placeholder="Kat" required/><input className={field} name="officeCode" defaultValue={x.office_code??''} placeholder="Ofis / kod" required/></div><label className="block text-xs text-slate-400">Yeni logo (opsiyonel)<input className={`${field} mt-1`} name="logo" type="file" accept="image/jpeg,image/png,image/webp"/></label><div className="flex flex-wrap justify-between gap-2"><span className="text-sm text-slate-400">{x.is_active?'Aktif':'Pasif'}</span><div className="flex flex-wrap gap-2"><button className="rounded-lg bg-slate-700 px-3 py-2 text-xs" type="button" onClick={()=>void action(x.id,'reset')}>PIN yenile</button><button className="rounded-lg bg-slate-700 px-3 py-2 text-xs" type="button" onClick={()=>void action(x.id,'set-active',!x.is_active)}>{x.is_active?'Pasife al':'Aktifleştir'}</button><button className={primary}>Kaydet</button></div></div></form>)}</div></div>;
+}
+function AdminMeters(){ const [rows,setRows]=useState<MeterReading[]>([]); useEffect(()=>{void supabase.from('meter_readings').select('id,meter_type,photo_path,reading_value,notes,access_method,created_at').order('created_at',{ascending:false}).then(({data})=>setRows((data as MeterReading[])??[]));},[]); const photo=async(path:string)=>{const {data}=await supabase.storage.from('meter-photos').createSignedUrl(path,60);if(data?.signedUrl)open(data.signedUrl,'_blank','noopener,noreferrer');}; return <div className="space-y-3"><h1 className="mb-6 text-3xl font-bold">Sayaç Kayıtları</h1>{rows.map(x=><div className={panel} key={x.id}><div className="flex flex-wrap justify-between gap-3"><div><b>{x.meter_type==='electricity'?'Elektrik':'Doğalgaz'}{x.reading_value!==null?` · ${x.reading_value}`:''}</b><p className="text-sm text-slate-400">{x.notes||'Not yok'} · {new Date(x.created_at).toLocaleString('tr-TR')}</p></div><button className="rounded-lg bg-slate-700 px-3 py-2 text-sm" onClick={()=>void photo(x.photo_path)}>Fotoğrafı aç</button></div></div>)}{!rows.length&&<Empty text="Sayaç kaydı bulunmuyor."/>}</div>; }
+function TechnicianSettings(){ const [shown,setShown]=useState('');const [error,setError]=useState('');const run=async(action:'initialize'|'rotate',target?:'qr'|'pin')=>{try{const result=await invoke<{rawToken?:string;pin?:string}>('technician-access',{body:{action,target}});if(result.rawToken)setShown(`${location.origin}/tekniker#token=${result.rawToken}`);if(result.pin)setShown(result.pin);}catch(cause){setError(err(cause));}};return <div className={`${panel} space-y-3`}><h2 className="flex items-center gap-2 text-xl font-bold"><Wrench/>Tekniker Erişimi</h2><p className="text-sm text-slate-400">QR token ve fallback PIN yalnız üretildiği anda gösterilir.</p><div className="flex flex-wrap gap-2"><button className={primary} onClick={()=>void run('initialize')}>İlk kurulum</button><button className={primary} onClick={()=>void run('rotate','qr')}><RefreshCw className="mr-2 inline" size={16}/>QR yenile</button><button className={primary} onClick={()=>void run('rotate','pin')}><RefreshCw className="mr-2 inline" size={16}/>PIN yenile</button></div>{shown?<pre className="overflow-auto rounded-xl bg-slate-950 p-3 text-sm text-emerald-400">{shown}</pre>:null}<ErrorMessage text={error}/></div>; }
 
-  const isProtectedAdminTab = activeTab.startsWith('admin-');
-  const hasValidAdminAuth = isAuthenticatedAdmin();
-
-  return (
-    <div className="min-h-screen flex flex-col bg-[#0B0F17] text-slate-100 font-sans selection:bg-brand-500 selection:text-white">
-      
-      {/* Top Header Navbar */}
-      <Header
-        activeTab={activeTab}
-        setActiveTab={handleTabChange}
-        isAdminLoggedIn={isAdminLoggedIn && hasValidAdminAuth}
-        onAdminLogout={handleAdminLogout}
-        onOpenAdminLogin={() => setIsAdminLoginModalOpen(true)}
-      />
-
-      {/* Main Page Body Router View */}
-      <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6">
-        
-        {activeTab === 'welcome' && (
-          <WelcomeScreen
-            setActiveTab={handleTabChange}
-            onSelectCompanyForReport={(comp) => setPreselectedCompany(comp)}
-            onOpenAdminLogin={() => setIsAdminLoginModalOpen(true)}
-            isAdminLoggedIn={isAdminLoggedIn && hasValidAdminAuth}
-          />
-        )}
-
-        {activeTab === 'create-report' && (
-          <CreateReportForm
-            setActiveTab={handleTabChange}
-            preselectedCompany={preselectedCompany}
-            onReportCreated={(rep) => setCreatedReport(rep)}
-          />
-        )}
-
-        {activeTab === 'success' && (
-          <SuccessScreen
-            report={createdReport}
-            setActiveTab={handleTabChange}
-            onSetTrackCode={(code) => setTrackingCodeSearch(code)}
-          />
-        )}
-
-        {activeTab === 'track' && (
-          <ReportTracking
-            setActiveTab={handleTabChange}
-            initialTrackingCode={trackingCodeSearch}
-          />
-        )}
-
-        {activeTab === 'meter-upload' && (
-          <MeterUploadForm
-            setActiveTab={handleTabChange}
-          />
-        )}
-
-        {/* Administrator Protected Views Guard */}
-        {isProtectedAdminTab && !hasValidAdminAuth && (
-          <ErrorPages type="denied" setActiveTab={handleTabChange} />
-        )}
-
-        {isProtectedAdminTab && hasValidAdminAuth && (
-          <>
-            {activeTab === 'admin-dashboard' && (
-              <AdminDashboard
-                setActiveTab={handleTabChange}
-                onSelectReportDetail={(rep) => setSelectedReportDetail(rep)}
-              />
-            )}
-
-            {activeTab === 'admin-reports' && (
-              <AdminReportList
-                setActiveTab={handleTabChange}
-                onSelectReport={(rep) => setSelectedReportDetail(rep)}
-              />
-            )}
-
-            {activeTab === 'admin-meters' && (
-              <AdminMeterManagement
-                setActiveTab={handleTabChange}
-              />
-            )}
-
-            {activeTab === 'admin-qr' && (
-              <AdminQrManagement
-                setActiveTab={handleTabChange}
-              />
-            )}
-
-            {activeTab === 'admin-settings' && (
-              <AdminSettings
-                setActiveTab={handleTabChange}
-              />
-            )}
-          </>
-        )}
-
-        {/* Error States */}
-        {activeTab === 'error-404' && <ErrorPages type="404" setActiveTab={handleTabChange} />}
-        {activeTab === 'error-500' && <ErrorPages type="500" setActiveTab={handleTabChange} />}
-        {activeTab === 'error-offline' && <ErrorPages type="offline" setActiveTab={handleTabChange} />}
-        {activeTab === 'error-denied' && <ErrorPages type="denied" setActiveTab={handleTabChange} />}
-
-      </main>
-
-      {/* Admin Login Modal */}
-      <AdminLoginModal
-        isOpen={isAdminLoginModalOpen}
-        onClose={() => setIsAdminLoginModalOpen(false)}
-        onSuccess={handleAdminLoginSuccess}
-      />
-
-      {/* Admin Report Detail Modal */}
-      {selectedReportDetail && (
-        <AdminReportDetailModal
-          report={selectedReportDetail}
-          onClose={() => setSelectedReportDetail(null)}
-          onReportUpdated={() => setSelectedReportDetail(null)}
-        />
-      )}
-
-      {/* Footer */}
-      <Footer setActiveTab={handleTabChange} />
-
-    </div>
-  );
-};
-
-export default App;
+function Technician(){
+  const token=new URLSearchParams(location.hash.slice(1)).get('token'); const [grant,setGrant]=useState(''); const [busy,setBusy]=useState(Boolean(token)); const [error,setError]=useState(''); const [done,setDone]=useState(false);
+  useEffect(()=>{if(!token)return;void invoke<{grant:string}>('technician-access',{body:{action:'validate',qrToken:token}}).then(x=>{setGrant(x.grant);history.replaceState({},'','/tekniker');}).catch(cause=>setError(err(cause))).finally(()=>setBusy(false));},[token]);
+  const login=async(event:FormEvent<HTMLFormElement>)=>{event.preventDefault();setBusy(true);setError('');try{const data=new FormData(event.currentTarget);const result=await invoke<{grant:string}>('technician-access',{body:{action:'validate',pin:data.get('pin')}});setGrant(result.grant);}catch(cause){setError(err(cause));}finally{setBusy(false);}};
+  const submit=async(event:FormEvent<HTMLFormElement>)=>{event.preventDefault();setBusy(true);setError('');try{const data=new FormData(event.currentTarget);const source=data.get('photo');if(!(source instanceof File)||!source.size)throw new Error('Sayaç fotoğrafı zorunludur.');data.set('photo',await toWebp(source));data.set('grant',grant);await invoke('technician-access',{body:data});setDone(true);setGrant('');}catch(cause){setError(err(cause));}finally{setBusy(false);}};
+  if(busy&&!grant)return <Empty text="Tekniker erişimi doğrulanıyor…"/>;
+  if(done)return <div className={`${panel} mx-auto max-w-lg text-center`}><Gauge className="mx-auto mb-3 text-emerald-400" size={48}/><h1 className="text-2xl font-bold">Sayaç kaydı alındı</h1><p className="mt-2 text-slate-400">Bu ekran geçmiş kayıtları göstermez.</p><button className={`${primary} mt-5`} onClick={()=>setDone(false)}>Yeni kayıt</button></div>;
+  if(!grant)return <form className={`${panel} mx-auto max-w-md space-y-4`} onSubmit={login}><h1 className="text-2xl font-bold">Tekniker Girişi</h1><p className="text-sm text-slate-400">QR kullanmadan giriş için fallback PIN’i yazın.</p><input className={field} name="pin" type="password" inputMode="numeric" pattern="[0-9]{4,6}" minLength={4} maxLength={6} required placeholder="4–6 haneli PIN"/><ErrorMessage text={error}/><button className={`${primary} w-full`} disabled={busy}>Devam et</button></form>;
+  return <form className={`${panel} mx-auto max-w-xl space-y-4`} onSubmit={submit}><h1 className="text-2xl font-bold">Sayaç Yükle</h1><select className={field} name="meterType" required defaultValue=""><option value="" disabled>Sayaç türü</option><option value="electricity">Elektrik</option><option value="natural_gas">Doğalgaz</option></select><label className="block text-sm">Sayaç fotoğrafı (zorunlu)<input className={`${field} mt-2`} name="photo" type="file" accept="image/jpeg,image/png,image/webp" capture="environment" required/></label><input className={field} name="readingValue" type="number" inputMode="decimal" min="0" step="0.001" placeholder="Sayaç değeri (opsiyonel)"/><textarea className={field} name="notes" maxLength={2000} rows={4} placeholder="Not (opsiyonel)"/><ErrorMessage text={error}/><button className={`${primary} w-full`} disabled={busy}>{busy?'Gönderiliyor…':'Kaydet'}</button></form>;
+}

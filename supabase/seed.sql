@@ -1,0 +1,5 @@
+-- Development/test data only.
+--
+-- Keep production reference data in explicit, idempotent migrations instead
+-- of this file. Supabase applies this file only in local seed/reset workflows.
+-- Never add Auth users, passwords, access tokens, or project credentials here.

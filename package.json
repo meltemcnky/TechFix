@@ -5,21 +5,18 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "typecheck": "tsc --noEmit",
     "build": "tsc && vite build",
     "preview": "vite preview"
   },
   "dependencies": {
-    "@types/qrcode": "^1.5.6",
-    "canvas-confetti": "^1.9.4",
-    "jspdf": "^4.2.1",
+    "@supabase/supabase-js": "^2.112.3",
     "lucide-react": "^0.475.0",
-    "qrcode": "^1.5.4",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "recharts": "^2.15.1"
   },
   "devDependencies": {
-    "@types/canvas-confetti": "^1.9.0",
     "@types/node": "^22.13.4",
     "@types/react": "^19.0.10",
     "@types/react-dom": "^19.0.4",
