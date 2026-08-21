@@ -5,6 +5,8 @@ import { normalizeCompanyName } from '../_shared/http.ts';
 const allowedOrigins = [Deno.env.get('ALLOWED_ORIGINS'), Deno.env.get('ADDITIONAL_ALLOWED_ORIGINS')]
   .filter(Boolean).join(',')
   .split(',').map((x) => x.trim()).filter(Boolean);
+const adminLoginUsername = (Deno.env.get('ADMIN_LOGIN_USERNAME') ?? '').trim();
+const adminAuthEmail = (Deno.env.get('ADMIN_AUTH_EMAIL') ?? '').trim();
 
 function headers(request: Request) {
   const origin = request.headers.get('origin') ?? '';
@@ -66,7 +68,10 @@ Deno.serve(async (request) => {
         const { data, error } = await publicClient.auth.signInWithPassword({ email: company.auth_email, password });
         if (!error && data.session) return json(request, { role: 'company', session: data.session });
       } else {
-        const { data, error } = await publicClient.auth.signInWithPassword({ email: username, password });
+        const loginEmail = adminLoginUsername && adminAuthEmail && username === adminLoginUsername
+          ? adminAuthEmail
+          : username;
+        const { data, error } = await publicClient.auth.signInWithPassword({ email: loginEmail, password });
         if (!error && data.session) {
           const { data: admin } = await service.from('admin_users').select('is_active')
             .eq('user_id', data.user.id).maybeSingle();

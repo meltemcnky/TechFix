@@ -1849,12 +1849,7 @@ function TechnicianAccessPanel() {
         { body: { action: "rotate", target, pinLength: 6 } },
       );
       if (target === "qr" && data.rawToken) {
-        const origin =
-          (import.meta.env.VITE_PUBLIC_APP_URL as string | undefined)?.replace(
-            /\/$/,
-            "",
-          ) || location.origin;
-        const url = `${origin}/tekniker#token=${data.rawToken}`;
+        const url = `${location.origin}/tekniker#token=${data.rawToken}`;
         const image = await createQrSheet(url, data.pin);
         setResult({ url, pin: data.pin, image });
       } else setResult({ pin: data.pin });
