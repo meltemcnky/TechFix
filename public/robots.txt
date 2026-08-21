@@ -1,4 +1,4 @@
-# TechFix Robots.txt for Googlebot & Search Engine Indexing
+# TeknoTakip Robots.txt for Googlebot & Search Engine Indexing
 User-agent: *
 Allow: /
 Disallow: /admin

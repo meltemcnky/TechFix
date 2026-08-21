@@ -1,4 +1,4 @@
-# TechFix deployment
+# TeknoTakip deployment
 
 ## Architecture
 
@@ -21,7 +21,7 @@ environment files are intentionally not recorded in Git.
 
 ## Technician QR operation
 
-TechFix has no public QR generator, PDF flow, or simulator. An authenticated
+TeknoTakip has no public QR generator, PDF flow, or simulator. An authenticated
 admin can rotate the single physical QR and fallback PIN, preview the resulting
 QR+PIN sheet, and download it as PNG for the meter cabinet. The QR contains
 `/tekniker#token=<server-generated-token>` on the configured public origin. A

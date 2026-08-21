@@ -1,10 +1,10 @@
-# TechFix Supabase workflow
+# TeknoTakip Supabase workflow
 
-The ordered migration chain is the complete TechFix schema. The personal
+The ordered migration chain is the complete TeknoTakip schema. The personal
 Supabase FREE project is DEV/test only; the corporate PRO project will be built
 from the same baseline without demo data.
 
-TechFix uses hosted Supabase. Docker and a local Supabase stack are not part of
+TeknoTakip uses hosted Supabase. Docker and a local Supabase stack are not part of
 the application architecture. The standalone Supabase CLI is used only to link
 projects, inspect migration history, and apply reviewed SQL migrations.
 
@@ -40,7 +40,7 @@ records belong to the baseline; DEV companies are created through the secured
 
 ## Edge Function secrets
 
-TechFix uses only `company-credentials` and `technician-access`. Configure the
+TeknoTakip uses only `company-credentials` and `technician-access`. Configure the
 server-only values in each hosted Supabase project:
 
 ```sh
