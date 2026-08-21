@@ -77,18 +77,50 @@ Deno.serve(async (request) => {
 
     if (action === 'request-reset') {
       const service = serviceClient();
-      const companyName = normalizeCompanyName(String(body.companyName ?? ''));
+      const username = String(body.username ?? body.companyName ?? '').trim();
+      if (!username || username.length > 254) {
+        return json(request, { ok: true, accountType: 'unknown', message: 'Bilgiler eşleşiyorsa şifre yenileme işlemi başlatıldı.' });
+      }
+      const companyName = normalizeCompanyName(username);
       if (companyName) {
         const { data: company } = await service.from('companies').select('id,name')
-          .eq('normalized_name', companyName).eq('is_active', true).maybeSingle();
+          .eq('normalized_name', companyName).eq('is_active', true).is('removed_at', null).maybeSingle();
         if (company) {
-          await service.from('notifications').insert({
-            audience: 'admin', company_id: company.id, type: 'password_request',
-            title: 'Firma şifre talebi', message: `${company.name} yeni şifre talep etti.`,
-          });
+          const { data: openRequest } = await service.from('notifications').select('id')
+            .eq('audience', 'admin').eq('type', 'password_request').eq('company_id', company.id)
+            .is('read_at', null).maybeSingle();
+          if (!openRequest) {
+            const { error } = await service.from('notifications').insert({
+              audience: 'admin', company_id: company.id, type: 'password_request',
+              title: 'Firma şifre talebi', message: `${company.name} yeni şifre talep etti.`,
+            });
+            if (error && error.code !== '23505') return json(request, { error: 'Şifre talebi oluşturulamadı.' }, 500);
+          }
+          return json(request, { ok: true, accountType: 'company', message: 'Şifre yenileme talebiniz yönetime iletildi.' });
         }
       }
-      return json(request, { ok: true, message: 'Firma eşleşiyorsa talebiniz yönetime iletildi.' });
+
+      if (username.includes('@')) {
+        const { data: admins } = await service.from('admin_users').select('user_id').eq('is_active', true);
+        for (const admin of admins ?? []) {
+          const { data: authUser } = await service.auth.admin.getUserById(admin.user_id);
+          if (authUser.user?.email?.toLocaleLowerCase('en-US') === username.toLocaleLowerCase('en-US')) {
+            const publicClient = createClient(
+              Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_ANON_KEY')!,
+              { auth: { persistSession: false, autoRefreshToken: false } },
+            );
+            const origin = request.headers.get('origin') ?? '';
+            const redirectOrigin = allowedOrigins.includes(origin) ? origin : allowedOrigins[0];
+            if (!redirectOrigin) return json(request, { error: 'Şifre yenileme yönlendirmesi yapılandırılmamış.' }, 503);
+            const { error } = await publicClient.auth.resetPasswordForEmail(username, {
+              redirectTo: `${redirectOrigin.replace(/\/$/, '')}/sifre-yenile`,
+            });
+            if (error) return json(request, { error: 'Şifre yenileme e-postası şu anda gönderilemedi.' }, 429);
+            return json(request, { ok: true, accountType: 'admin', message: 'Şifre yenileme bağlantısı ilgili e-posta adresine gönderildi.' });
+          }
+        }
+      }
+      return json(request, { ok: true, accountType: 'unknown', message: 'Bilgiler eşleşiyorsa şifre yenileme işlemi başlatıldı.' });
     }
 
     const admin = await requireAdmin(request);

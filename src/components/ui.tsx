@@ -21,6 +21,11 @@ export function ConfirmDialog({open,title,message,confirmLabel='Onayla',danger=f
   return <div className="fixed inset-0 z-[90] grid place-items-center bg-slate-950/55 p-4" onMouseDown={e=>{if(e.target===e.currentTarget)onClose();}}><div role="dialog" aria-modal="true" className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl"><h2 className="text-xl font-bold text-slate-900">{title}</h2><p className="mt-3 text-sm text-slate-600">{message}</p><div className="mt-6 flex justify-end gap-2"><button className="btn-secondary" onClick={onClose}>Vazgeç</button><button className={danger?'btn-danger':'btn-primary'} onClick={onConfirm}>{confirmLabel}</button></div></div></div>;
 }
 
+export function InfoDialog({open,title,children,onClose}:{open:boolean;title:string;children:ReactNode;onClose:()=>void}){
+  if(!open)return null;
+  return <div className="fixed inset-0 z-[90] grid place-items-center bg-slate-950/55 p-4" onMouseDown={e=>{if(e.target===e.currentTarget)onClose();}}><div role="dialog" aria-modal="true" aria-labelledby="info-dialog-title" className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl"><h2 id="info-dialog-title" className="text-xl font-bold text-slate-900">{title}</h2><div className="mt-3 text-sm text-slate-600">{children}</div><div className="mt-6 flex justify-end"><button className="btn-primary" onClick={onClose}>Tamam</button></div></div></div>;
+}
+
 export function OverflowMenu({children,label='İşlemler'}:{children:ReactNode;label?:string}){
   const [open,setOpen]=useState(false);const ref=useRef<HTMLDivElement>(null);
   useEffect(()=>{const close=(e:MouseEvent)=>{if(!ref.current?.contains(e.target as Node))setOpen(false)};addEventListener('mousedown',close);return()=>removeEventListener('mousedown',close)},[]);

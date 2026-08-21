@@ -77,6 +77,10 @@ Vercel verifies the domain and provisions TLS. Vercel already provides the CDN,
 so Cloudflare proxying is not required.
 
 After the domain is active, add its exact callback/site URLs to Supabase Auth.
+Password recovery additionally requires the exact `/sifre-yenile` URL for each
+deployed origin in the Supabase Auth redirect allow-list. Production must use a
+deliverable admin email address and a configured transactional SMTP provider;
+the DEV-only `.invalid` admin address cannot receive recovery mail.
 
 ## DEV database rebuild
 

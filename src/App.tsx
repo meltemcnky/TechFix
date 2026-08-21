@@ -36,12 +36,14 @@ import { toWebp } from "./utils/imageCompressor";
 import { createQrSheet, downloadDataUrl } from "./utils/qrSheet";
 import {
   ConfirmDialog,
+  InfoDialog,
   ImageLightbox,
   MenuButton,
   OverflowMenu,
   ToastProvider,
   useToast,
 } from "./components/ui";
+import { managementContact } from "./config";
 import type {
   Category,
   Company,
@@ -163,6 +165,12 @@ function AppCore() {
     return (
       <Shell>
         <Technician />
+      </Shell>
+    );
+  if (path === "/sifre-yenile")
+    return (
+      <Shell>
+        <PasswordRecovery authorized={role === "admin"} go={go} />
       </Shell>
     );
   if (role === "guest")
@@ -329,6 +337,7 @@ function Login({ go }: { go: (path: string) => void }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
+  const [companyResetDialog, setCompanyResetDialog] = useState(false);
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setBusy(true);
@@ -337,16 +346,20 @@ function Login({ go }: { go: (path: string) => void }) {
     const form = new FormData(event.currentTarget);
     try {
       if (reset) {
-        const result = await invoke<{ message: string }>(
+        const result = await invoke<{
+          accountType: "company" | "admin" | "unknown";
+          message: string;
+        }>(
           "company-credentials",
           {
             body: {
               action: "request-reset",
-              companyName: form.get("username"),
+              username: form.get("username"),
             },
           },
         );
-        setMessage(result.message);
+        if (result.accountType === "company") setCompanyResetDialog(true);
+        else setMessage(result.message);
       } else {
         const result = await invoke<{
           role: "admin" | "company";
@@ -376,7 +389,7 @@ function Login({ go }: { go: (path: string) => void }) {
         <div>
           <p className="text-sm font-semibold text-blue-700">TeknoTakip</p>
           <h1 className="text-2xl font-bold text-navy">
-            {reset ? "Yönetimden Şifre Talep Et" : "Giriş Yap"}
+            {reset ? "Şifremi Unuttum" : "Giriş Yap"}
           </h1>
         </div>
         <input
@@ -403,7 +416,11 @@ function Login({ go }: { go: (path: string) => void }) {
           </p>
         ) : null}
         <button className={`${primary} w-full`} disabled={busy}>
-          {busy ? "İşleniyor…" : reset ? "Talep Oluştur" : "Giriş Yap"}
+          {busy
+            ? "İşleniyor…"
+            : reset
+              ? "Şifre Yenileme Talebi Oluştur"
+              : "Giriş Yap"}
         </button>
         <button
           type="button"
@@ -417,7 +434,123 @@ function Login({ go }: { go: (path: string) => void }) {
           {reset ? "Giriş ekranına dön" : "Şifremi unuttum"}
         </button>
       </form>
+      <InfoDialog
+        open={companyResetDialog}
+        title="Şifre yenileme talebi oluşturuldu"
+        onClose={() => setCompanyResetDialog(false)}
+      >
+        <p>
+          Talebiniz yönetime iletildi. Yeni şifrenizi yönetim ofisinden talep
+          edebilirsiniz.
+        </p>
+        <dl className="mt-4 space-y-2 rounded-xl bg-slate-50 p-4">
+          <div>
+            <dt className="font-semibold text-slate-800">Yönetim ofisi</dt>
+            <dd>{managementContact.address}</dd>
+          </div>
+          <div>
+            <dt className="font-semibold text-slate-800">Telefon</dt>
+            <dd>
+              <a
+                className="text-blue-700 hover:underline"
+                href={`tel:${managementContact.phone.replace(/\s/g, "")}`}
+              >
+                {managementContact.phone}
+              </a>
+            </dd>
+          </div>
+        </dl>
+      </InfoDialog>
     </div>
+  );
+}
+
+function PasswordRecovery({
+  authorized,
+  go,
+}: {
+  authorized: boolean;
+  go: (path: string) => void;
+}) {
+  const toast = useToast();
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const submit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setError("");
+    const form = new FormData(event.currentTarget);
+    const password = String(form.get("password") ?? "");
+    const confirmation = String(form.get("confirmation") ?? "");
+    if (password !== confirmation) {
+      setError("Şifreler eşleşmiyor.");
+      return;
+    }
+    if (
+      password.length < 12 ||
+      !/[a-z]/.test(password) ||
+      !/[A-Z]/.test(password) ||
+      !/[0-9]/.test(password) ||
+      !/[^A-Za-z0-9]/.test(password)
+    ) {
+      setError(
+        "Şifre en az 12 karakter olmalı; büyük harf, küçük harf, rakam ve sembol içermelidir.",
+      );
+      return;
+    }
+    setBusy(true);
+    const { error: updateError } = await supabase.auth.updateUser({ password });
+    if (updateError) {
+      setError(updateError.message);
+      setBusy(false);
+      return;
+    }
+    await supabase.auth.signOut();
+    toast.show("Şifreniz yenilendi. Yeni şifrenizle giriş yapabilirsiniz.");
+    go("/giris");
+  };
+  if (!authorized)
+    return (
+      <div className={`${panel} mx-auto max-w-md text-center`}>
+        <h1 className="text-2xl font-bold text-navy">
+          Bağlantı geçersiz veya süresi dolmuş
+        </h1>
+        <p className="mt-3 text-sm text-slate-500">
+          Giriş ekranından yeni bir şifre yenileme bağlantısı talep edin.
+        </p>
+        <button className={`${primary} mt-5`} onClick={() => go("/giris")}>
+          Giriş ekranına dön
+        </button>
+      </div>
+    );
+  return (
+    <form className={`${panel} mx-auto max-w-md space-y-4`} onSubmit={submit}>
+      <h1 className="text-2xl font-bold text-navy">Yeni Şifre Belirle</h1>
+      <p className="text-sm text-slate-500">
+        En az 12 karakter; büyük harf, küçük harf, rakam ve sembol kullanın.
+      </p>
+      <input
+        className={field}
+        name="password"
+        type="password"
+        autoComplete="new-password"
+        placeholder="Yeni şifre"
+        minLength={12}
+        required
+      />
+      <input
+        className={field}
+        name="confirmation"
+        type="password"
+        autoComplete="new-password"
+        placeholder="Yeni şifre tekrar"
+        minLength={12}
+        required
+      />
+      <ErrorMessage text={error} />
+      <button className={`${primary} w-full`} disabled={busy}>
+        {busy ? "Kaydediliyor…" : "Şifreyi Yenile"}
+      </button>
+    </form>
   );
 }
 
