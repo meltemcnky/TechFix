@@ -14,7 +14,10 @@ function cors(request: Request) {
   };
 }
 function json(request: Request, body: unknown, status = 200) {
-  return new Response(JSON.stringify(body), { status, headers: { ...cors(request), 'Content-Type': 'application/json', 'Cache-Control': 'no-store' } });
+  const payload = status >= 400 && body && typeof body === 'object' && 'error' in body && !('code' in body)
+    ? { ...body, code: `http_${status}` }
+    : body;
+  return new Response(JSON.stringify(payload), { status, headers: { ...cors(request), 'Content-Type': 'application/json', 'Cache-Control': 'no-store' } });
 }
 async function sha256(value: string) {
   const digest = await crypto.subtle.digest('SHA-256', encoder.encode(value));
@@ -112,6 +115,7 @@ Deno.serve(async (request) => {
         audience: 'admin', meter_reading_id: id, type: 'meter_created',
         title: 'Yeni sayaç kaydı',
         message: `${meterType === 'electricity' ? 'Elektrik' : 'Doğalgaz'} sayaç kaydı oluşturuldu.`,
+        translation_key: 'notifications.meterCreated', translation_params: { meterType },
       });
       return json(request, { ok: true }, 201);
     }

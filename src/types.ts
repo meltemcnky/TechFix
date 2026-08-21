@@ -10,11 +10,12 @@ export type TicketStatus = 'new' | 'under_review' | 'in_progress' | 'resolved' |
 export type Ticket = {
   id: string; company_id: string; category_id: string; title: string; description: string; photo_path: string | null;
   status: TicketStatus; admin_public_note: string | null; created_at: string; updated_at: string; resolved_at: string | null;
-  companies?: Pick<Company, 'name' | 'block' | 'floor' | 'office_code'> | null; categories?: Pick<Category, 'name'> | null;
+  companies?: Pick<Company, 'name' | 'block' | 'floor' | 'office_code'> | null; categories?: Pick<Category, 'code' | 'name'> | null;
 };
 export type Notification = {
   id: string; audience: 'admin' | 'company'; company_id: string | null; ticket_id: string | null;
   meter_reading_id: string | null; type: 'ticket_updated' | 'password_request' | 'meter_created'; title: string; message: string; read_at: string | null; created_at: string;
+  translation_key: string; translation_params: Record<string, string>;
   companies?: Pick<Company, 'name'> | null;
 };
 export type MeterReading = {

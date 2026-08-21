@@ -1,4 +1,5 @@
 import { createClient } from '@supabase/supabase-js';
+import i18n from '../i18n';
 
 const url = import.meta.env.VITE_SUPABASE_URL as string | undefined;
 const anonKey = import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined;
@@ -25,6 +26,15 @@ export async function invoke<T>(name: string, options?: { body?: unknown; method
     body: options?.body instanceof FormData ? options.body : options?.body ? JSON.stringify(options.body) : undefined,
   });
   const payload = await response.json().catch(() => ({}));
-  if (!response.ok) throw new ApiError(payload.error || 'İşlem tamamlanamadı.',payload.code,response.status);
+  if (!response.ok) {
+    const codeKey = payload.code ? `errors.api.${payload.code}` : '';
+    const statusKey = `errors.http.${response.status}`;
+    const message = codeKey && i18n.exists(codeKey)
+      ? String(i18n.t(codeKey))
+      : i18n.exists(statusKey)
+        ? String(i18n.t(statusKey))
+        : String(i18n.t('errors.generic'));
+    throw new ApiError(message, payload.code, response.status);
+  }
   return payload as T;
 }

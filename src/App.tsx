@@ -11,12 +11,15 @@ import {
   FileText,
   Flame,
   Gauge,
+  LoaderCircle,
   LogOut,
   Plus,
   Trash2,
   X,
   Zap,
 } from "lucide-react";
+import { useTranslation } from "react-i18next";
+import i18n from "./i18n";
 import {
   Bar,
   BarChart,
@@ -57,17 +60,21 @@ import type {
 import teknoTakipLogo from "../images/mt_logo.png";
 
 const field = "field";
+const tx = (key: string) => String(i18n.t(key));
+const formatDateTime = (value: string) => new Date(value).toLocaleString(i18n.resolvedLanguage === "en" ? "en-US" : "tr-TR");
+const categoryLabel = (category: Pick<Category, "code" | "name">) =>
+  i18n.exists(`categories.${category.code}`) ? tx(`categories.${category.code}`) : category.name;
 const panel = "panel";
 const primary = "btn-primary";
 const statusLabels: Record<TicketStatus, string> = {
-  new: "Yeni",
-  under_review: "İnceleniyor",
-  in_progress: "İşlemde",
-  resolved: "Çözüldü",
-  archived: "Arşivlendi",
+  get new() { return tx("ticket.new"); },
+  get under_review() { return tx("ticket.underReview"); },
+  get in_progress() { return tx("ticket.inProgress"); },
+  get resolved() { return tx("ticket.resolved"); },
+  get archived() { return tx("ticket.archived"); },
 };
 const err = (value: unknown) =>
-  value instanceof Error ? value.message : "Beklenmeyen bir hata oluştu.";
+  value instanceof Error ? value.message : tx("errors.unexpected");
 const notifyChanged = () => dispatchEvent(new Event("notifications-changed"));
 function useRoute() {
   const [route, setRoute] = useState(location.pathname + location.search);
@@ -95,6 +102,7 @@ export default function App() {
   );
 }
 function AppCore() {
+  useTranslation();
   const { path, search, go } = useRoute();
   const [role, setRole] = useState<Role>("guest");
   const [company, setCompany] = useState<Company | null>(null);
@@ -152,13 +160,13 @@ function AppCore() {
   if (!isSupabaseConfigured)
     return (
       <Shell>
-        <Empty text="Supabase ortam değişkenleri tanımlanmalıdır." />
+        <Empty text={tx("common.notConfigured")} />
       </Shell>
     );
   if (loading)
     return (
       <Shell>
-        <Empty text="Oturum kontrol ediliyor…" />
+        <Empty text={tx("common.sessionChecking")} />
       </Shell>
     );
   if (path.startsWith("/tekniker"))
@@ -206,6 +214,7 @@ function Shell({
   go?: (path: string) => void;
   onLogout?: () => void;
 }) {
+  const { t, i18n } = useTranslation();
   const [unread, setUnread] = useState(0);
   const load = () => {
     if (!role) return;
@@ -224,16 +233,16 @@ function Shell({
   const nav =
     role === "company"
       ? [
-          ["/firma", "Ana Sayfa"],
-          ["/firma/ariza-bildir", "Arıza Bildir"],
-          ["/firma/talepler", "Taleplerim"],
+          ["/firma", t("nav.home")],
+          ["/firma/ariza-bildir", t("nav.createTicket")],
+          ["/firma/talepler", t("nav.myTickets")],
         ]
       : [
-          ["/admin/dashboard", "Dashboard"],
-          ["/admin/talepler", "Talepler"],
-          ["/admin/sayaclar", "Sayaçlar"],
-          ["/admin/firmalar", "Firmalar"],
-          ["/admin/kategoriler", "Kategoriler"],
+          ["/admin/dashboard", t("nav.dashboard")],
+          ["/admin/talepler", t("nav.tickets")],
+          ["/admin/sayaclar", t("nav.meters")],
+          ["/admin/firmalar", t("nav.companies")],
+          ["/admin/kategoriler", t("nav.categories")],
         ];
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900">
@@ -272,10 +281,23 @@ function Shell({
           ) : (
             <span />
           )}
+          <div className="flex items-center gap-2">
+            <div className="flex rounded-lg border border-slate-200 bg-slate-50 p-0.5" aria-label={t("language.select")}>
+              {(["tr", "en"] as const).map((language) => (
+                <button
+                  type="button"
+                  key={language}
+                  className={`rounded-md px-2 py-1 text-xs font-bold ${i18n.resolvedLanguage === language ? "bg-navy text-white" : "text-slate-500"}`}
+                  onClick={() => void i18n.changeLanguage(language)}
+                >
+                  {t(`language.${language}`)}
+                </button>
+              ))}
+            </div>
           {role && go ? (
-            <div className="flex items-center gap-2">
+            <>
               <button
-                aria-label="Bildirimler"
+                aria-label={t("nav.notifications")}
                 className="icon-button relative"
                 onClick={() =>
                   go(
@@ -293,16 +315,15 @@ function Shell({
                 ) : null}
               </button>
               <button
-                aria-label="Çıkış"
+                aria-label={t("nav.logout")}
                 className="icon-button"
                 onClick={onLogout}
               >
                 <LogOut size={19} />
               </button>
-            </div>
-          ) : (
-            <span />
-          )}
+            </>
+          ) : null}
+          </div>
         </div>
       </header>
       <main className="mx-auto max-w-7xl px-4 py-6 sm:py-8">{children}</main>
@@ -333,6 +354,7 @@ function PageTitle({ title, action }: { title: string; action?: ReactNode }) {
 }
 
 function Login({ go }: { go: (path: string) => void }) {
+  const { t } = useTranslation();
   const [reset, setReset] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -389,14 +411,14 @@ function Login({ go }: { go: (path: string) => void }) {
         <div>
           <p className="text-sm font-semibold text-blue-700">TeknoTakip</p>
           <h1 className="text-2xl font-bold text-navy">
-            {reset ? "Şifremi Unuttum" : "Giriş Yap"}
+            {reset ? t("auth.forgotTitle") : t("auth.title")}
           </h1>
         </div>
         <input
           className={field}
           name="username"
           autoComplete="username"
-          placeholder="Kullanıcı adı"
+          placeholder={t("auth.username")}
           required
         />
         {!reset ? (
@@ -405,7 +427,7 @@ function Login({ go }: { go: (path: string) => void }) {
             name="password"
             type="password"
             autoComplete="current-password"
-            placeholder="Şifre"
+            placeholder={t("auth.password")}
             required
           />
         ) : null}
@@ -417,10 +439,10 @@ function Login({ go }: { go: (path: string) => void }) {
         ) : null}
         <button className={`${primary} w-full`} disabled={busy}>
           {busy
-            ? "İşleniyor…"
+            ? t("auth.processing")
             : reset
-              ? "Şifre Yenileme Talebi Oluştur"
-              : "Giriş Yap"}
+              ? t("auth.resetRequest")
+              : t("auth.login")}
         </button>
         <button
           type="button"
@@ -431,25 +453,24 @@ function Login({ go }: { go: (path: string) => void }) {
             setMessage("");
           }}
         >
-          {reset ? "Giriş ekranına dön" : "Şifremi unuttum"}
+          {reset ? t("auth.backToLogin") : t("auth.forgot")}
         </button>
       </form>
       <InfoDialog
         open={companyResetDialog}
-        title="Şifre yenileme talebi oluşturuldu"
+        title={t("auth.resetDialog")}
         onClose={() => setCompanyResetDialog(false)}
       >
         <p>
-          Talebiniz yönetime iletildi. Yeni şifrenizi yönetim ofisinden talep
-          edebilirsiniz.
+          {t("auth.companyResetHelp")}
         </p>
         <dl className="mt-4 space-y-2 rounded-xl bg-slate-50 p-4">
           <div>
-            <dt className="font-semibold text-slate-800">Yönetim ofisi</dt>
+            <dt className="font-semibold text-slate-800">{t("auth.managementOffice")}</dt>
             <dd>{managementContact.address}</dd>
           </div>
           <div>
-            <dt className="font-semibold text-slate-800">Telefon</dt>
+            <dt className="font-semibold text-slate-800">{t("auth.phone")}</dt>
             <dd>
               <a
                 className="text-blue-700 hover:underline"
@@ -472,6 +493,7 @@ function PasswordRecovery({
   authorized: boolean;
   go: (path: string) => void;
 }) {
+  const { t } = useTranslation();
   const toast = useToast();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -482,7 +504,7 @@ function PasswordRecovery({
     const password = String(form.get("password") ?? "");
     const confirmation = String(form.get("confirmation") ?? "");
     if (password !== confirmation) {
-      setError("Şifreler eşleşmiyor.");
+      setError(t("errors.passwordMismatch"));
       return;
     }
     if (
@@ -493,7 +515,7 @@ function PasswordRecovery({
       !/[^A-Za-z0-9]/.test(password)
     ) {
       setError(
-        "Şifre en az 12 karakter olmalı; büyük harf, küçük harf, rakam ve sembol içermelidir.",
+        t("errors.passwordStrength"),
       );
       return;
     }
@@ -505,35 +527,35 @@ function PasswordRecovery({
       return;
     }
     await supabase.auth.signOut();
-    toast.show("Şifreniz yenilendi. Yeni şifrenizle giriş yapabilirsiniz.");
+    toast.show(t("auth.passwordUpdated"));
     go("/giris");
   };
   if (!authorized)
     return (
       <div className={`${panel} mx-auto max-w-md text-center`}>
         <h1 className="text-2xl font-bold text-navy">
-          Bağlantı geçersiz veya süresi dolmuş
+          {t("auth.invalidRecovery")}
         </h1>
         <p className="mt-3 text-sm text-slate-500">
-          Giriş ekranından yeni bir şifre yenileme bağlantısı talep edin.
+          {t("auth.requestNewLink")}
         </p>
         <button className={`${primary} mt-5`} onClick={() => go("/giris")}>
-          Giriş ekranına dön
+          {t("auth.backToLogin")}
         </button>
       </div>
     );
   return (
     <form className={`${panel} mx-auto max-w-md space-y-4`} onSubmit={submit}>
-      <h1 className="text-2xl font-bold text-navy">Yeni Şifre Belirle</h1>
+      <h1 className="text-2xl font-bold text-navy">{t("auth.newPassword")}</h1>
       <p className="text-sm text-slate-500">
-        En az 12 karakter; büyük harf, küçük harf, rakam ve sembol kullanın.
+        {t("auth.passwordHint")}
       </p>
       <input
         className={field}
         name="password"
         type="password"
         autoComplete="new-password"
-        placeholder="Yeni şifre"
+        placeholder={t("auth.newPassword")}
         minLength={12}
         required
       />
@@ -542,13 +564,13 @@ function PasswordRecovery({
         name="confirmation"
         type="password"
         autoComplete="new-password"
-        placeholder="Yeni şifre tekrar"
+        placeholder={t("auth.newPasswordAgain")}
         minLength={12}
         required
       />
       <ErrorMessage text={error} />
       <button className={`${primary} w-full`} disabled={busy}>
-        {busy ? "Kaydediliyor…" : "Şifreyi Yenile"}
+        {busy ? t("common.saving") : t("auth.updatePassword")}
       </button>
     </form>
   );
@@ -574,7 +596,7 @@ function CompanyArea({
   if (path === "/firma/talepler")
     return (
       <>
-        <PageTitle title="Taleplerim" />
+        <PageTitle title={tx("nav.myTickets")} />
         <TicketList companyId={company.id} initialId={search.get("ticket")} />
       </>
     );
@@ -597,10 +619,10 @@ function CompanyHome({
   }, []);
   const values = useMemo(
     () => ({
-      Açık: tickets.filter((x) => ["new", "under_review"].includes(x.status))
+      [tx("company.open")]: tickets.filter((x) => ["new", "under_review"].includes(x.status))
         .length,
-      İşlemde: tickets.filter((x) => x.status === "in_progress").length,
-      Çözülen: tickets.filter((x) => x.status === "resolved").length,
+      [tx("company.inProgress")]: tickets.filter((x) => x.status === "in_progress").length,
+      [tx("company.resolved")]: tickets.filter((x) => x.status === "resolved").length,
     }),
     [tickets],
   );
@@ -608,7 +630,7 @@ function CompanyHome({
     <div className="space-y-6">
       <div className="flex flex-wrap justify-between gap-4">
         <div>
-          <p className="font-semibold text-blue-700">Firma Paneli</p>
+          <p className="font-semibold text-blue-700">{tx("company.panel")}</p>
           <h1 className="text-3xl font-bold text-navy">{company.name}</h1>
           <p className="text-slate-500">
             {[company.block, company.floor, company.office_code]
@@ -618,7 +640,7 @@ function CompanyHome({
         </div>
         <button className={primary} onClick={() => go("/firma/ariza-bildir")}>
           <Plus className="mr-2 inline" size={18} />
-          Arıza Bildir
+          {tx("nav.createTicket")}
         </button>
       </div>
       <div className="grid gap-3 sm:grid-cols-3">
@@ -662,7 +684,7 @@ function TicketCreate({
       const {
         data: { user },
       } = await supabase.auth.getUser();
-      if (!user) throw new Error("Oturum bulunamadı.");
+      if (!user) throw new Error(tx("errors.sessionMissing"));
       const photo = form.get("photo");
       if (photo instanceof File && photo.size) {
         const webp = await toWebp(photo);
@@ -694,14 +716,14 @@ function TicketCreate({
   };
   return (
     <form className={`${panel} mx-auto max-w-2xl space-y-4`} onSubmit={submit}>
-      <PageTitle title="Yeni Arıza Bildirimi" />
+      <PageTitle title={tx("ticket.newReport")} />
       <select className={field} name="categoryId" required defaultValue="">
         <option value="" disabled>
-          Kategori seçin
+          {tx("ticket.chooseCategory")}
         </option>
         {categories.map((x) => (
           <option key={x.id} value={x.id}>
-            {x.name}
+            {categoryLabel(x)}
           </option>
         ))}
       </select>
@@ -710,7 +732,7 @@ function TicketCreate({
         name="title"
         minLength={3}
         maxLength={160}
-        placeholder="Başlık"
+        placeholder={tx("ticket.title")}
         required
       />
       <textarea
@@ -719,11 +741,11 @@ function TicketCreate({
         minLength={10}
         maxLength={5000}
         rows={6}
-        placeholder="Arızayı açıklayın"
+        placeholder={tx("ticket.description")}
         required
       />
       <label className="block text-sm font-medium">
-        Fotoğraf (opsiyonel)
+        {tx("ticket.photo")}
         <input
           className={`${field} mt-2`}
           name="photo"
@@ -733,7 +755,7 @@ function TicketCreate({
       </label>
       <ErrorMessage text={error} />
       <button className={primary} disabled={busy}>
-        {busy ? "Gönderiliyor…" : "Talebi Oluştur"}
+        {busy ? tx("ticket.sending") : tx("ticket.create")}
       </button>
     </form>
   );
@@ -769,7 +791,7 @@ function SignedPhoto({
       ) : null}
     </>
   ) : (
-    <p className="mt-3 text-sm text-slate-400">Fotoğraf yükleniyor…</p>
+    <p className="mt-3 text-sm text-slate-400">{tx("photo.loading")}</p>
   );
 }
 function TicketList({
@@ -787,7 +809,7 @@ function TicketList({
   useEffect(() => {
     let query = supabase
       .from("tickets")
-      .select("*,categories(name),companies(name,block,floor,office_code)")
+      .select("*,categories(code,name),companies(name,block,floor,office_code)")
       .order("created_at", { ascending: false });
     if (companyId) query = query.eq("company_id", companyId);
     if (limit) query = query.limit(limit);
@@ -816,7 +838,7 @@ function TicketList({
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0 flex-1">
                 <p className="text-xs font-semibold text-blue-700">
-                  {ticket.categories?.name}
+                  {ticket.categories ? categoryLabel(ticket.categories) : ""}
                   {ticket.companies?.name ? ` · ${ticket.companies.name}` : ""}
                 </p>
                 <h3 className="mt-1 font-bold text-navy">{ticket.title}</h3>
@@ -842,11 +864,11 @@ function TicketList({
                 ) : null}
                 {ticket.admin_public_note ? (
                   <p className="mt-4 rounded-xl bg-blue-50 p-3 text-sm text-blue-900">
-                    <b>Yönetim notu:</b> {ticket.admin_public_note}
+                    <b>{tx("ticket.managementNote")}</b> {ticket.admin_public_note}
                   </p>
                 ) : null}
                 <p className="mt-3 text-xs text-slate-400">
-                  {new Date(ticket.created_at).toLocaleString("tr-TR")}
+                  {formatDateTime(ticket.created_at)}
                 </p>
               </div>
             ) : null}
@@ -854,13 +876,13 @@ function TicketList({
               className="mt-4 flex items-center gap-1 text-sm font-semibold text-blue-700"
               onClick={() => setOpen(expanded ? null : ticket.id)}
             >
-              {expanded ? "Kapat" : "Detaylar"}
+              {expanded ? tx("common.close") : tx("common.details")}
               {expanded ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
             </button>
           </article>
         );
       })}
-      {!rows.length ? <Empty text="Kayıt bulunamadı." /> : null}
+      {!rows.length ? <Empty text={tx("common.noRecords")} /> : null}
     </div>
   );
 }
@@ -872,6 +894,7 @@ function Notifications({
   audience: "admin" | "company";
   go: (path: string) => void;
 }) {
+  const { t } = useTranslation();
   const toast = useToast();
   const [rows, setRows] = useState<Notification[]>([]);
   const load = () =>
@@ -891,7 +914,8 @@ function Notifications({
       toast.show(error.message, "error");
       return;
     }
-    toast.show("Bildirimler güncellendi.");
+    if (name === "mark_all_notifications_read") toast.show(t("notifications.allRead"));
+    if (name === "clear_notifications") toast.show(t("notifications.cleared"));
     load();
     notifyChanged();
   };
@@ -904,29 +928,45 @@ function Notifications({
       go(`/admin/sayaclar?meter=${item.meter_reading_id}`);
     else if (item.company_id) go(`/admin/firmalar?company=${item.company_id}`);
   };
+  const notificationText = (item: Notification) => {
+    if (item.translation_key === "notifications.ticketUpdated") {
+      const status = item.translation_params?.status ?? "updated";
+      return { title: t("notifications.ticketUpdated.title"), message: t(`notifications.ticketUpdated.message.${status}`) };
+    }
+    if (item.translation_key === "notifications.passwordRequest") {
+      return { title: t("notifications.passwordRequest.title"), message: t("notifications.passwordRequest.message") };
+    }
+    if (item.translation_key === "notifications.meterCreated") {
+      const meterType = item.translation_params?.meterType ?? "natural_gas";
+      return { title: t("notifications.meterCreated.title"), message: t(`notifications.meterCreated.message.${meterType}`) };
+    }
+    return { title: item.title, message: item.message };
+  };
   return (
     <div>
       <PageTitle
-        title="Bildirimler"
+        title={t("notifications.title")}
         action={
           <div className="flex flex-wrap gap-2">
             <button
               className="btn-secondary"
               onClick={() => void rpc("mark_all_notifications_read")}
             >
-              Tümünü Okundu Yap
+              {t("notifications.markAll")}
             </button>
             <button
               className="btn-danger"
               onClick={() => void rpc("clear_notifications")}
             >
-              Tümünü Temizle
+              {t("notifications.clearAll")}
             </button>
           </div>
         }
       />
       <div className="space-y-3">
-        {rows.map((item) => (
+        {rows.map((item) => {
+          const text = notificationText(item);
+          return (
           <article
             className={`${panel} ${item.read_at ? "opacity-65" : ""}`}
             key={item.id}
@@ -936,19 +976,19 @@ function Notifications({
                 className="min-w-0 flex-1 text-left"
                 onClick={() => target(item)}
               >
-                <b className="text-navy">{item.title}</b>
+                <b className="text-navy">{text.title}</b>
                 {item.companies?.name ? (
                   <span className="ml-2 text-sm text-blue-700">
                     {item.companies.name}
                   </span>
                 ) : null}
-                <p className="text-sm text-slate-600">{item.message}</p>
+                <p className="text-sm text-slate-600">{text.message}</p>
                 <small className="text-slate-400">
-                  {new Date(item.created_at).toLocaleString("tr-TR")}
+                  {formatDateTime(item.created_at)}
                 </small>
               </button>
               <button
-                aria-label="Bildirimi kaldır"
+                aria-label={t("notifications.remove")}
                 className="icon-button"
                 onClick={() => void rpc("remove_notification", item.id)}
               >
@@ -960,12 +1000,13 @@ function Notifications({
                 className="mt-3 text-sm font-semibold text-blue-700"
                 onClick={() => void rpc("mark_notification_read", item.id)}
               >
-                Okundu olarak işaretle
+                {t("notifications.markRead")}
               </button>
             ) : null}
           </article>
-        ))}
-        {!rows.length ? <Empty text="Bildirim bulunmuyor." /> : null}
+          );
+        })}
+        {!rows.length ? <Empty text={t("notifications.none")} /> : null}
       </div>
     </div>
   );
@@ -1017,13 +1058,13 @@ function AdminDashboard({ go }: { go: (path: string) => void }) {
     adet: tickets.filter((x) => x.status === status).length,
   }));
   const metrics: [typeof FileText, string, number, string][] = [
-    [FileText, "Talepler", tickets.length, "/admin/talepler"],
-    [Building2, "Aktif Firmalar", companies, "/admin/firmalar"],
-    [Gauge, "Sayaçlar", meters, "/admin/sayaclar"],
+    [FileText, tx("nav.tickets"), tickets.length, "/admin/talepler"],
+    [Building2, tx("admin.activeCompanies"), companies, "/admin/firmalar"],
+    [Gauge, tx("nav.meters"), meters, "/admin/sayaclar"],
   ];
   return (
     <div className="space-y-6">
-      <PageTitle title="Yönetim Dashboard" />
+      <PageTitle title={tx("admin.title")} />
       <div className="grid gap-3 sm:grid-cols-3">
         {metrics.map(([Icon, label, value, path]) => (
           <button
@@ -1040,7 +1081,7 @@ function AdminDashboard({ go }: { go: (path: string) => void }) {
       <div className={panel}>
         <h2 className="mb-4 flex items-center gap-2 font-bold text-navy">
           <BarChart3 />
-          Talep Durumları
+          {tx("admin.ticketStatuses")}
         </h2>
         <div className="h-72">
           <ResponsiveContainer>
@@ -1073,7 +1114,7 @@ function AdminTickets({ initialId }: { initialId: string | null }) {
   const load = () => {
     let query = supabase
       .from("tickets")
-      .select("*,categories(name),companies(name,block,floor,office_code)")
+      .select("*,categories(code,name),companies(name,block,floor,office_code)")
       .order("created_at", { ascending: false });
     if (filters.status) query = query.eq("status", filters.status);
     if (filters.company) query = query.eq("company_id", filters.company);
@@ -1118,17 +1159,17 @@ function AdminTickets({ initialId }: { initialId: string | null }) {
       .eq("id", id);
     if (error) toast.show(error.message, "error");
     else {
-      toast.show("Değişiklikler kaydedildi.");
+      toast.show(tx("ticket.saved"));
       load();
     }
   };
   const exportCsv = () => {
     const esc = (v: unknown) => `"${String(v ?? "").replace(/"/g, '""')}"`;
     const csv = [
-      ["Firma", "Kategori", "Başlık", "Durum", "Tarih"],
+      [tx("csv.company"), tx("csv.category"), tx("csv.title"), tx("csv.status"), tx("csv.date")],
       ...rows.map((x) => [
         x.companies?.name,
-        x.categories?.name,
+        x.categories ? categoryLabel(x.categories) : "",
         x.title,
         statusLabels[x.status],
         x.created_at,
@@ -1148,10 +1189,10 @@ function AdminTickets({ initialId }: { initialId: string | null }) {
   return (
     <div>
       <PageTitle
-        title="Talepler"
+        title={tx("nav.tickets")}
         action={
           <button className={primary} onClick={exportCsv}>
-            CSV Dışa Aktar
+            {tx("ticket.exportCsv")}
           </button>
         }
       />
@@ -1164,12 +1205,11 @@ function AdminTickets({ initialId }: { initialId: string | null }) {
             onChange={(e) => setFilters({ ...filters, [key]: e.target.value })}
           >
             <option value="">
-              Tüm{" "}
               {key === "company"
-                ? "firmalar"
+                ? tx("ticket.allCompanies")
                 : key === "category"
-                  ? "kategoriler"
-                  : "durumlar"}
+                  ? tx("ticket.allCategories")
+                  : tx("ticket.allStatuses")}
             </option>
             {key === "company"
               ? companies.map((x) => (
@@ -1180,7 +1220,7 @@ function AdminTickets({ initialId }: { initialId: string | null }) {
               : key === "category"
                 ? categories.map((x) => (
                     <option value={x.id} key={x.id}>
-                      {x.name}
+                      {categoryLabel(x)}
                     </option>
                   ))
                 : Object.entries(statusLabels).map(([v, l]) => (
@@ -1214,7 +1254,7 @@ function AdminTickets({ initialId }: { initialId: string | null }) {
               >
                 <div>
                   <p className="text-xs font-semibold text-blue-700">
-                    {ticket.companies?.name} · {ticket.categories?.name}
+                    {ticket.companies?.name} · {ticket.categories ? categoryLabel(ticket.categories) : ""}
                   </p>
                   <h2 className="font-bold text-navy">{ticket.title}</h2>
                   {!expanded ? (
@@ -1253,10 +1293,10 @@ function AdminTickets({ initialId }: { initialId: string | null }) {
                       className={field}
                       name="note"
                       defaultValue={ticket.admin_public_note ?? ""}
-                      placeholder="Firmaya görünür not"
+                      placeholder={tx("ticket.visibleNote")}
                       maxLength={3000}
                     />
-                    <button className={primary}>Güncelle</button>
+                    <button className={primary}>{tx("ticket.update")}</button>
                   </div>
                 </div>
               ) : null}
@@ -1290,7 +1330,7 @@ function AdminCategories() {
     if (error) toast.show(error.message, "error");
     else {
       form.reset();
-      toast.show("Kategori oluşturuldu.");
+      toast.show(tx("category.created"));
       load();
     }
   };
@@ -1302,13 +1342,13 @@ function AdminCategories() {
     setConfirm(null);
     if (error) toast.show(error.message, "error");
     else {
-      toast.show("Kategori kaldırıldı.");
+      toast.show(tx("category.removed"));
       load();
     }
   };
   return (
     <div>
-      <PageTitle title="Kategoriler" />
+      <PageTitle title={tx("category.title")} />
       <form
         className={`${panel} mb-6 flex flex-col gap-3 sm:flex-row`}
         onSubmit={create}
@@ -1318,10 +1358,10 @@ function AdminCategories() {
           name="name"
           minLength={2}
           maxLength={80}
-          placeholder="Kategori adı"
+          placeholder={tx("category.name")}
           required
         />
-        <button className={primary}>Kategori Ekle</button>
+        <button className={primary}>{tx("category.add")}</button>
       </form>
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         {rows.map((x) => (
@@ -1329,10 +1369,10 @@ function AdminCategories() {
             className={`${panel} flex min-h-32 items-center justify-between gap-3`}
             key={x.id}
           >
-            <b className="text-navy">{x.name}</b>
+            <b className="text-navy">{categoryLabel(x)}</b>
             <button
               className="icon-button text-red-700"
-              aria-label={`${x.name} kategorisini kaldır`}
+              aria-label={`${tx("category.remove")}: ${categoryLabel(x)}`}
               onClick={() => setConfirm(x)}
             >
               <Trash2 size={18} />
@@ -1342,10 +1382,10 @@ function AdminCategories() {
       </div>
       <ConfirmDialog
         open={!!confirm}
-        title="Kategoriyi Kaldır"
-        message={`${confirm?.name ?? ""} kategorisi kaldırılacaktır. Onaylıyor musunuz?`}
+        title={tx("category.remove")}
+        message={String(i18n.t("category.confirmRemove", { name: confirm?.name ?? "" }))}
         danger
-        confirmLabel="Kaldır"
+        confirmLabel={tx("common.remove")}
         onClose={() => setConfirm(null)}
         onConfirm={() => void remove()}
       />
@@ -1364,6 +1404,7 @@ function LocationPicker({
   onChange: (id: string) => void;
   currentCompanyId?: string;
 }) {
+  const { t } = useTranslation();
   const current = locations.find((x) => x.id === value);
   const [block, setBlock] = useState(current?.block ?? "");
   const [floor, setFloor] = useState(current?.floor ?? "");
@@ -1390,7 +1431,7 @@ function LocationPicker({
         }}
         required
       >
-        <option value="">Blok</option>
+        <option value="">{t("location.block")}</option>
         {blocks.map((x) => (
           <option key={x}>{x}</option>
         ))}
@@ -1405,7 +1446,7 @@ function LocationPicker({
         required
         disabled={!block}
       >
-        <option value="">Kat</option>
+        <option value="">{t("location.floor")}</option>
         {floors.map((x) => (
           <option key={x}>{x}</option>
         ))}
@@ -1417,7 +1458,7 @@ function LocationPicker({
         required
         disabled={!floor}
       >
-        <option value="">Ofis/Oda</option>
+        <option value="">{t("location.office")}</option>
         {locations
           .filter((x) => x.block === block && x.floor === floor)
           .map((x) => {
@@ -1440,11 +1481,13 @@ function LocationPicker({
 }
 
 function AdminCompanies({ initialId }: { initialId: string | null }) {
+  const { t } = useTranslation();
   const toast = useToast();
   const [rows, setRows] = useState<Company[]>([]);
   const [locations, setLocations] = useState<Location[]>([]);
   const [newLocation, setNewLocation] = useState("");
   const [passwords, setPasswords] = useState<Record<string, string>>({});
+  const [editing, setEditing] = useState<Company | null>(null);
   const [confirm, setConfirm] = useState<{
     company: Company;
     action: "reset" | "deactivate" | "remove";
@@ -1497,7 +1540,7 @@ function AdminCompanies({ initialId }: { initialId: string | null }) {
       setPasswords((x) => ({ ...x, [result.company.id]: result.password }));
       form.reset();
       setNewLocation("");
-      toast.show("Firma oluşturuldu.");
+      toast.show(t("company.created"));
       await load();
     } catch (cause) {
       toast.show(err(cause), "error");
@@ -1514,7 +1557,7 @@ function AdminCompanies({ initialId }: { initialId: string | null }) {
           { body: { action: "reset", companyId: company.id } },
         );
         setPasswords((x) => ({ ...x, [company.id]: result.password }));
-        toast.show("Yeni şifre oluşturuldu.");
+        toast.show(t("company.passwordCreated"));
       } else if (action === "deactivate") {
         await invoke("company-credentials", {
           body: {
@@ -1523,13 +1566,13 @@ function AdminCompanies({ initialId }: { initialId: string | null }) {
             isActive: false,
           },
         });
-        toast.show("Firma pasife alındı.");
+        toast.show(t("company.deactivated"));
         await load();
       } else {
         await invoke("company-credentials", {
           body: { action: "remove", companyId: company.id },
         });
-        toast.show("Firma kaldırıldı; geçmiş talepler korundu.");
+        toast.show(t("company.removed"));
         await load();
       }
     } catch (cause) {
@@ -1541,7 +1584,7 @@ function AdminCompanies({ initialId }: { initialId: string | null }) {
       await invoke("company-credentials", {
         body: { action: "set-active", companyId: company.id, isActive: true },
       });
-      toast.show("Firma aktifleştirildi.");
+      toast.show(t("company.activated"));
       await load();
     } catch (cause) {
       toast.show(err(cause), "error");
@@ -1556,38 +1599,22 @@ function AdminCompanies({ initialId }: { initialId: string | null }) {
     const data = new FormData(event.currentTarget);
     const location = locations.find((x) => x.id === locationId);
     if (!location) {
-      toast.show("Lokasyon seçin.", "error");
+      toast.show(t("location.required"), "error");
       return;
     }
-    let logoPath = company.logo_path;
     try {
-      const logo = data.get("logo");
-      if (logo instanceof File && logo.size) {
-        const webp = await toWebp(logo, {
-          maxDimension: 800,
-          maxBytes: 2 * 1024 * 1024,
-        });
-        logoPath = `${company.id}/${webp.name}`;
-        const { error } = await supabase.storage
-          .from("company-logos")
-          .upload(logoPath, webp, { contentType: "image/webp" });
-        if (error) throw error;
-      }
       const name = String(data.get("name")).trim();
-      const { error } = await supabase
-        .from("companies")
-        .update({
+      await invoke("company-credentials", {
+        body: {
+          action: "update",
+          companyId: company.id,
           name,
-          normalized_name: name.replace(/\s+/g, " ").toLocaleLowerCase("tr-TR"),
-          location_id: location.id,
-          block: location.block,
-          floor: location.floor,
-          office_code: location.office_code,
-          logo_path: logoPath,
-        })
-        .eq("id", company.id);
-      if (error) throw error;
-      toast.show("Değişiklikler kaydedildi.");
+          locationId: location.id,
+          logoPath: company.logo_path,
+        },
+      });
+      setEditing(null);
+      toast.show(t("company.updated"));
       await load();
     } catch (cause) {
       toast.show(err(cause), "error");
@@ -1595,31 +1622,33 @@ function AdminCompanies({ initialId }: { initialId: string | null }) {
   };
   return (
     <div>
-      <PageTitle title="Firmalar" />
-      <div className="grid gap-6 lg:grid-cols-[360px_1fr]">
-        <form className={`${panel} h-fit space-y-3`} onSubmit={create}>
-          <h2 className="text-xl font-bold text-navy">Yeni Firma Oluştur</h2>
+      <PageTitle title={t("company.title")} />
+      <div className="space-y-6">
+        <form className={`${panel} grid gap-3 md:grid-cols-[1fr_2fr_auto] md:items-end`} onSubmit={create}>
+          <label className="text-sm font-semibold text-slate-700">
+            {t("company.name")}
           <input
-            className={field}
+            className={`${field} mt-1`}
             name="name"
-            placeholder="Firma adı"
+            placeholder={t("company.name")}
             required
           />
+          </label>
           <LocationPicker
             locations={locations}
             value={newLocation}
             onChange={setNewLocation}
           />
-          <button className={`${primary} w-full`}>Firma Oluştur</button>
+          <button className={primary}>{t("company.createButton")}</button>
         </form>
-        <div className="space-y-3">
+        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
           {rows.map((company) => (
             <CompanyCard
               key={company.id}
               company={company}
               locations={locations}
               password={passwords[company.id]}
-              onUpdate={update}
+              onEdit={() => setEditing(company)}
               onConfirm={(action) => setConfirm({ company, action })}
               onActivate={() => void activate(company)}
               toast={toast.show}
@@ -1627,23 +1656,29 @@ function AdminCompanies({ initialId }: { initialId: string | null }) {
           ))}
         </div>
       </div>
+      <EditCompanyDialog
+        company={editing}
+        locations={locations}
+        onClose={() => setEditing(null)}
+        onSave={update}
+      />
       <ConfirmDialog
         open={!!confirm}
-        title="İşlemi Onayla"
+        title={t("company.confirmTitle")}
         message={
           confirm?.action === "reset"
-            ? `${confirm.company.name} firması için yeni şifre oluşturmak istediğinize emin misiniz?`
+            ? t("company.confirmReset", { name: confirm.company.name })
             : confirm?.action === "deactivate"
-              ? `${confirm?.company.name} firmasını pasife almak istediğinize emin misiniz?`
-              : `${confirm?.company.name} firmasını kaldırmak istediğinize emin misiniz? Geçmiş talepler korunacaktır.`
+              ? t("company.confirmDeactivate", { name: confirm?.company.name })
+              : t("company.confirmRemove", { name: confirm?.company.name })
         }
         danger={confirm?.action !== "reset"}
         confirmLabel={
           confirm?.action === "reset"
-            ? "Yeni Şifre Oluştur"
+            ? t("company.resetPassword")
             : confirm?.action === "deactivate"
-              ? "Pasife Al"
-              : "Firmayı Kaldır"
+              ? t("company.deactivate")
+              : t("company.remove")
         }
         onClose={() => setConfirm(null)}
         onConfirm={() => void execute()}
@@ -1654,85 +1689,63 @@ function AdminCompanies({ initialId }: { initialId: string | null }) {
 
 function CompanyCard({
   company,
-  locations,
   password,
-  onUpdate,
+  onEdit,
   onConfirm,
   onActivate,
   toast,
 }: {
   company: Company;
-  locations: Location[];
   password?: string;
-  onUpdate: (e: FormEvent<HTMLFormElement>, c: Company, l: string) => void;
+  locations: Location[];
+  onEdit: () => void;
   onConfirm: (a: "reset" | "deactivate" | "remove") => void;
   onActivate: () => void;
   toast: (m: string, k?: "success" | "error" | "info") => void;
 }) {
-  const [locationId, setLocationId] = useState(company.location_id ?? "");
+  const { t } = useTranslation();
+  const [copied, setCopied] = useState(false);
+  const location = [company.block, company.floor, company.office_code].filter(Boolean).join(" / ");
   return (
-    <form
+    <article
       id={`company-${company.id}`}
-      className={`${panel} space-y-3`}
-      onSubmit={(e) => void onUpdate(e, company, locationId)}
+      className={`${panel} flex min-h-40 flex-col justify-between gap-4 p-4`}
     >
-      <div className="flex items-start justify-between gap-3">
-        <div className="flex-1">
-          <input
-            className={`${field} font-bold`}
-            name="name"
-            defaultValue={company.name}
-            required
-          />
-          <p
-            className={`mt-2 text-sm ${company.is_active ? "text-emerald-700" : "text-slate-400"}`}
-          >
-            {company.is_active ? "Aktif" : "Pasif"}
-          </p>
-        </div>
+      <div className="flex items-start justify-between gap-2">
+        <h2 className="min-w-0 flex-1 truncate font-bold text-navy" title={company.name}>{company.name}</h2>
+        <span className={`shrink-0 rounded-full px-2 py-1 text-xs font-bold ${company.is_active ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-500"}`}>
+          {company.is_active ? t("common.active") : t("common.inactive")}
+        </span>
         <OverflowMenu>
+          <MenuButton onClick={onEdit}>{t("common.edit")}</MenuButton>
           {company.is_active ? (
             <>
               <MenuButton onClick={() => onConfirm("reset")}>
-                Yeni Şifre Oluştur
+                {t("company.resetPassword")}
               </MenuButton>
               <MenuButton onClick={() => onConfirm("deactivate")} danger>
-                Pasife Al
+                {t("company.deactivate")}
               </MenuButton>
             </>
           ) : (
             <>
-              <MenuButton onClick={onActivate}>Aktifleştir</MenuButton>
+              <MenuButton onClick={onActivate}>{t("company.activate")}</MenuButton>
               <MenuButton onClick={() => onConfirm("reset")}>
-                Yeni Şifre Oluştur
+                {t("company.resetPassword")}
               </MenuButton>
               <MenuButton onClick={() => onConfirm("remove")} danger>
-                Firmayı Kaldır
+                {t("company.remove")}
               </MenuButton>
             </>
           )}
         </OverflowMenu>
       </div>
-      <LocationPicker
-        locations={locations}
-        value={locationId}
-        onChange={setLocationId}
-        currentCompanyId={company.id}
-      />
-      <label className="block text-xs text-slate-500">
-        Yeni logo (opsiyonel)
-        <input
-          className={`${field} mt-1`}
-          name="logo"
-          type="file"
-          accept="image/jpeg,image/png,image/webp"
-        />
-      </label>
+      <p className="text-sm text-slate-500">{location || "—"}</p>
       {password ? (
-        <div className="flex items-center justify-between rounded-xl border border-emerald-200 bg-emerald-50 p-4">
+        <div className="flex items-center justify-between rounded-xl border border-emerald-200 bg-emerald-50 p-3">
           <div>
             <small className="text-emerald-700">
-              Yalnızca şimdi gösterilir
+              {t("company.passwordOneTime")}
             </small>
             <p className="font-mono text-2xl font-bold tracking-wider text-emerald-900">
               {password}
@@ -1744,15 +1757,58 @@ function CompanyCard({
             onClick={() =>
               void navigator.clipboard
                 .writeText(password)
-                .then(() => toast("Şifre kopyalandı."))
+                .then(() => {
+                  setCopied(true);
+                  setTimeout(() => setCopied(false), 1600);
+                })
             }
           >
-            <Clipboard />
-          </button>
+              {copied ? <span className="text-xs font-bold">{t("clipboard.copied")}</span> : <Clipboard />}
+            </button>
+          </div>
+        ) : null}
+    </article>
+  );
+}
+
+function EditCompanyDialog({
+  company,
+  locations,
+  onClose,
+  onSave,
+}: {
+  company: Company | null;
+  locations: Location[];
+  onClose: () => void;
+  onSave: (e: FormEvent<HTMLFormElement>, c: Company, l: string) => void;
+}) {
+  const { t } = useTranslation();
+  const [name, setName] = useState("");
+  const [locationId, setLocationId] = useState("");
+  useEffect(() => {
+    setName(company?.name ?? "");
+    setLocationId(company?.location_id ?? "");
+  }, [company]);
+  if (!company) return null;
+  const dirty = name.trim() !== company.name || locationId !== (company.location_id ?? "");
+  return (
+    <div className="fixed inset-0 z-[90] grid place-items-center bg-slate-950/55 p-4" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
+      <form className="w-full max-w-lg space-y-4 rounded-2xl bg-white p-6 shadow-2xl" onSubmit={(e) => void onSave(e, company, locationId)}>
+        <div className="flex items-center justify-between gap-3">
+          <h2 className="text-xl font-bold text-navy">{t("company.edit")}</h2>
+          <button type="button" className="icon-button" aria-label={t("common.close")} onClick={onClose}><X size={18} /></button>
         </div>
-      ) : null}
-      <button className={primary}>Kaydet</button>
-    </form>
+        <label className="block text-sm font-semibold text-slate-700">
+          {t("company.name")}
+          <input className={`${field} mt-1`} name="name" value={name} onChange={(e) => setName(e.target.value)} minLength={2} maxLength={160} required />
+        </label>
+        <LocationPicker locations={locations} value={locationId} onChange={setLocationId} currentCompanyId={company.id} />
+        <div className="flex justify-end gap-2">
+          <button type="button" className="btn-secondary" onClick={onClose}>{t("common.cancel")}</button>
+          <button className={primary} disabled={!dirty || !name.trim() || !locationId}>{t("common.save")}</button>
+        </div>
+      </form>
+    </div>
   );
 }
 
@@ -1778,7 +1834,7 @@ function AdminMeters({ initialId }: { initialId: string | null }) {
   }, [initialId, rows]);
   return (
     <div>
-      <PageTitle title="Sayaç Kayıtları" action={<TechnicianAccessPanel />} />
+      <PageTitle title={tx("meter.records")} action={<TechnicianAccessPanel />} />
       <div className="space-y-3">
         {rows.map((x) => {
           const expanded = open === x.id;
@@ -1790,10 +1846,10 @@ function AdminMeters({ initialId }: { initialId: string | null }) {
               >
                 <div>
                   <b className="text-navy">
-                    {x.meter_type === "electricity" ? "Elektrik" : "Doğalgaz"}
+                    {x.meter_type === "electricity" ? tx("meter.electricity") : tx("meter.gas")}
                   </b>
                   <p className="text-sm text-slate-500">
-                    {new Date(x.created_at).toLocaleString("tr-TR")}
+                    {formatDateTime(x.created_at)}
                     {x.reading_value !== null ? ` · ${x.reading_value}` : ""}
                   </p>
                 </div>
@@ -1804,19 +1860,19 @@ function AdminMeters({ initialId }: { initialId: string | null }) {
                   <SignedPhoto
                     bucket="meter-photos"
                     path={x.photo_path}
-                    alt="Sayaç fotoğrafı"
+                    alt={tx("meter.photoAlt")}
                   />
                   <dl className="mt-4 grid gap-3 text-sm sm:grid-cols-3">
                     <div>
-                      <dt className="text-slate-400">Sayaç değeri</dt>
-                      <dd>{x.reading_value ?? "Girilmedi"}</dd>
+                      <dt className="text-slate-400">{tx("meter.value")}</dt>
+                      <dd>{x.reading_value ?? tx("meter.notEntered")}</dd>
                     </div>
                     <div>
-                      <dt className="text-slate-400">Not</dt>
-                      <dd>{x.notes || "Not yok"}</dd>
+                      <dt className="text-slate-400">{tx("meter.note")}</dt>
+                      <dd>{x.notes || tx("meter.noNote")}</dd>
                     </div>
                     <div>
-                      <dt className="text-slate-400">Erişim</dt>
+                      <dt className="text-slate-400">{tx("meter.access")}</dt>
                       <dd>{x.access_method.toUpperCase()}</dd>
                     </div>
                   </dl>
@@ -1825,112 +1881,109 @@ function AdminMeters({ initialId }: { initialId: string | null }) {
             </article>
           );
         })}
-        {!rows.length ? <Empty text="Sayaç kaydı bulunmuyor." /> : null}
+        {!rows.length ? <Empty text={tx("meter.none")} /> : null}
       </div>
     </div>
   );
 }
 
 function TechnicianAccessPanel() {
-  const toast = useToast();
+  const { t } = useTranslation();
   const [confirm, setConfirm] = useState<"qr" | "pin" | null>(null);
+  const [copied, setCopied] = useState(false);
   const [result, setResult] = useState<{
+    status: "rotating" | "rendering" | "ready" | "error";
+    target: "qr" | "pin";
     url?: string;
-    pin: string;
+    pin?: string;
     image?: string;
+    error?: string;
   } | null>(null);
+
+  const renderQr = async (url: string, pin: string) => {
+    setResult({ status: "rendering", target: "qr", url, pin });
+    try {
+      const image = await createQrSheet(url, pin, {
+        title: t("qr.sheetTitle"),
+        help: t("qr.sheetHelp"),
+        warning: t("qr.sheetWarning"),
+      });
+      setResult({ status: "ready", target: "qr", url, pin, image });
+    } catch {
+      setResult({ status: "error", target: "qr", url, pin, error: t("qr.renderFailed") });
+    }
+  };
+
   const rotate = async () => {
     if (!confirm) return;
     const target = confirm;
     setConfirm(null);
+    setResult({ status: "rotating", target });
     try {
       const data = await invoke<{ rawToken: string | null; pin: string }>(
         "technician-access",
         { body: { action: "rotate", target, pinLength: 6 } },
       );
       if (target === "qr" && data.rawToken) {
-        const url = `${location.origin}/tekniker#token=${data.rawToken}`;
-        const image = await createQrSheet(url, data.pin);
-        setResult({ url, pin: data.pin, image });
-      } else setResult({ pin: data.pin });
-      toast.show(
-        "Yeni bilgiler oluşturuldu. Fiziksel sayaç kutusundaki mevcut bilgilerle değiştirin.",
-        "info",
-      );
+        await renderQr(`${location.origin}/tekniker#token=${data.rawToken}`, data.pin);
+      } else {
+        setResult({ status: "ready", target, pin: data.pin });
+      }
     } catch (cause) {
-      toast.show(err(cause), "error");
+      setResult({ status: "error", target, error: err(cause) });
     }
   };
+
+  const loading = result?.status === "rotating" || result?.status === "rendering";
   return (
     <>
-      <OverflowMenu label="QR ve PIN işlemleri">
-        <MenuButton onClick={() => setConfirm("qr")}>QR Yenile</MenuButton>
-        <MenuButton onClick={() => setConfirm("pin")}>PIN Yenile</MenuButton>
+      <OverflowMenu label={t("qr.menu")}>
+        <MenuButton onClick={() => setConfirm("qr")}>{t("qr.refresh")}</MenuButton>
+        <MenuButton onClick={() => setConfirm("pin")}>{t("qr.refreshPin")}</MenuButton>
       </OverflowMenu>
       <ConfirmDialog
         open={!!confirm}
-        title={confirm === "qr" ? "QR ve PIN Yenile" : "PIN Yenile"}
-        message={
-          confirm === "qr"
-            ? "QR ve fallback PIN birlikte değişecektir. Fiziksel çıktıyı yenilemeniz gerekir."
-            : "Fallback PIN değişecektir. Fiziksel bilgiyi yenilemeniz gerekir."
-        }
-        confirmLabel="Yenile"
+        title={confirm === "qr" ? t("qr.confirmTitle") : t("qr.refreshPin")}
+        message={confirm === "qr" ? t("qr.confirmMessage") : t("qr.pinConfirmMessage")}
+        confirmLabel={confirm === "qr" ? t("qr.refresh") : t("qr.refreshPin")}
         onClose={() => setConfirm(null)}
         onConfirm={() => void rotate()}
       />
       {result ? (
         <div className="fixed inset-0 z-[80] grid place-items-center bg-slate-950/55 p-4">
           <div className="max-h-[90vh] w-full max-w-lg overflow-auto rounded-2xl bg-white p-5 shadow-2xl">
-            <div className="flex justify-between">
-              <h2 className="text-xl font-bold text-navy">
-                Yeni Tekniker Bilgileri
-              </h2>
-              <button className="icon-button" onClick={() => setResult(null)}>
-                <X />
-              </button>
+            <div className="flex justify-between gap-3">
+              <h2 className="text-xl font-bold text-navy">{t("qr.ready")}</h2>
+              <button className="icon-button" disabled={loading} aria-label={t("common.close")} onClick={() => setResult(null)}><X /></button>
             </div>
-            <p className="mt-2 text-sm text-amber-700">
-              Fiziksel sayaç kutusundaki mevcut bilgilerle değiştirin.
-            </p>
+            {loading ? (
+              <div className="grid min-h-72 place-items-center text-center">
+                <div>
+                  <LoaderCircle className="mx-auto animate-spin text-blue-700" size={48} />
+                  <p className="mt-4 font-semibold text-slate-600">{result.status === "rotating" ? t("qr.rotating") : t("qr.preparing")}</p>
+                </div>
+              </div>
+            ) : null}
+            {result.status === "ready" ? <p className="mt-2 text-sm text-amber-700">{t("qr.replacePhysical")}</p> : null}
+            {result.error ? <div className="mt-4"><ErrorMessage text={result.error} /></div> : null}
+            {result.status === "error" && result.url && result.pin ? (
+              <button className={`${primary} mt-4`} onClick={() => void renderQr(result.url!, result.pin!)}>{t("common.retry")}</button>
+            ) : null}
             {result.image ? (
               <div className="group relative mt-4">
-                <img
-                  src={result.image}
-                  alt="Tekniker QR ve PIN çıktısı"
-                  className="mx-auto max-h-[55vh]"
-                />
-                <button
-                  aria-label="QR görselini indir"
-                  className="icon-button absolute right-2 top-2 bg-white opacity-100 shadow transition-opacity sm:opacity-0 sm:group-hover:opacity-100 sm:focus:opacity-100"
-                  onClick={() =>
-                    downloadDataUrl(result.image!, "teknotakip-tekniker-qr.png")
-                  }
-                >
-                  <Download />
+                <img src={result.image} alt={t("qr.ready")} className="mx-auto max-h-[55vh]" />
+                <button aria-label={t("qr.download")} className="icon-button absolute right-2 top-2 bg-white opacity-100 shadow transition-opacity sm:opacity-0 sm:group-hover:opacity-100 sm:focus:opacity-100" onClick={() => downloadDataUrl(result.image!, "teknotakip-tekniker-qr.png")}><Download /></button>
+              </div>
+            ) : null}
+            {result.url ? <p className="mt-3 break-all rounded-lg bg-slate-100 p-2 text-xs">{result.url}</p> : null}
+            {result.pin ? (
+              <div className="mt-3 flex items-center justify-between rounded-xl bg-blue-50 p-4">
+                <span className="font-mono text-2xl font-bold text-navy">{result.pin}</span>
+                <button className="icon-button" onClick={() => void navigator.clipboard.writeText(result.pin!).then(() => { setCopied(true); setTimeout(() => setCopied(false), 1600); })}>
+                  {copied ? <span className="text-xs font-bold">{t("clipboard.copied")}</span> : <Clipboard />}
                 </button>
               </div>
             ) : null}
-            {result.url ? (
-              <p className="mt-3 break-all rounded-lg bg-slate-100 p-2 text-xs">
-                {result.url}
-              </p>
-            ) : null}
-            <div className="mt-3 flex items-center justify-between rounded-xl bg-blue-50 p-4">
-              <span className="font-mono text-2xl font-bold text-navy">
-                {result.pin}
-              </span>
-              <button
-                className="icon-button"
-                onClick={() =>
-                  void navigator.clipboard
-                    .writeText(result.pin)
-                    .then(() => toast.show("PIN kopyalandı."))
-                }
-              >
-                <Clipboard />
-              </button>
-            </div>
           </div>
         </div>
       ) : null}
@@ -2007,7 +2060,7 @@ function Technician() {
       const data = new FormData(event.currentTarget);
       const source = data.get("photo");
       if (!(source instanceof File) || !source.size)
-        throw new Error("Sayaç fotoğrafı zorunludur.");
+        throw new Error(tx("meter.photoRequired"));
       data.set("photo", await toWebp(source));
       data.set("grant", grant);
       await invoke("technician-access", { body: data });
@@ -2020,14 +2073,14 @@ function Technician() {
       setBusy(false);
     }
   };
-  if (busy && !grant) return <Empty text="Tekniker erişimi doğrulanıyor…" />;
+  if (busy && !grant) return <Empty text={tx("technician.verifying")} />;
   if (done)
     return (
       <div className={`${panel} mx-auto max-w-lg text-center`}>
         <Gauge className="mx-auto mb-3 text-emerald-600" size={48} />
-        <h1 className="text-2xl font-bold text-navy">Sayaç kaydı alındı</h1>
+        <h1 className="text-2xl font-bold text-navy">{tx("technician.success")}</h1>
         <p className="mt-2 text-slate-500">
-          15 dakikalık erişim süresince yeni kayıt ekleyebilirsiniz.
+          {tx("technician.accessDuration")}
         </p>
         <button
           className={`${primary} mt-5`}
@@ -2036,16 +2089,16 @@ function Technician() {
             setError("");
           }}
         >
-          Yeni Sayaç Yükle
+          {tx("technician.newUpload")}
         </button>
       </div>
     );
   if (!grant)
     return (
       <form className={`${panel} mx-auto max-w-md space-y-4`} onSubmit={login}>
-        <h1 className="text-2xl font-bold text-navy">Tekniker Girişi</h1>
+        <h1 className="text-2xl font-bold text-navy">{tx("technician.login")}</h1>
         <p className="text-sm text-slate-500">
-          QR kullanmadan giriş için fallback PIN’i yazın.
+          {tx("technician.pinHelp")}
         </p>
         <input
           className={field}
@@ -2056,11 +2109,11 @@ function Technician() {
           minLength={4}
           maxLength={6}
           required
-          placeholder="4–6 haneli PIN"
+          placeholder={tx("technician.pinPlaceholder")}
         />
         <ErrorMessage text={error} />
         <button className={`${primary} w-full`} disabled={busy}>
-          Devam Et
+          {tx("common.continue")}
         </button>
       </form>
     );
@@ -2078,7 +2131,7 @@ function TechnicianForm({
   const [type, setType] = useState<"electricity" | "natural_gas" | "">("");
   return (
     <form className={`${panel} mx-auto max-w-xl space-y-5`} onSubmit={onSubmit}>
-      <PageTitle title="Sayaç Yükle" />
+      <PageTitle title={tx("technician.upload")} />
       <div className="grid grid-cols-2 gap-3">
         <button
           type="button"
@@ -2086,7 +2139,7 @@ function TechnicianForm({
           onClick={() => setType("electricity")}
         >
           <Zap size={30} />
-          ELEKTRİK
+          {tx("meter.electricity").toUpperCase()}
         </button>
         <button
           type="button"
@@ -2094,12 +2147,12 @@ function TechnicianForm({
           onClick={() => setType("natural_gas")}
         >
           <Flame size={30} />
-          DOĞALGAZ
+          {tx("meter.gas").toUpperCase()}
         </button>
       </div>
       <input type="hidden" name="meterType" value={type} />
       <label className="block text-sm font-semibold">
-        Sayaç fotoğrafı (zorunlu)
+        {tx("meter.photoRequired")}
         <input
           className={`${field} mt-2`}
           name="photo"
@@ -2116,18 +2169,18 @@ function TechnicianForm({
         inputMode="decimal"
         min="0"
         step="0.001"
-        placeholder="Sayaç değeri (opsiyonel)"
+        placeholder={tx("meter.valuePlaceholder")}
       />
       <textarea
         className={field}
         name="notes"
         maxLength={2000}
         rows={4}
-        placeholder="Not (opsiyonel)"
+        placeholder={tx("meter.notePlaceholder")}
       />
       <ErrorMessage text={error} />
       <button className={`${primary} w-full`} disabled={busy || !type}>
-        {busy ? "Gönderiliyor…" : "Kaydet"}
+        {busy ? tx("ticket.sending") : tx("meter.submit")}
       </button>
     </form>
   );

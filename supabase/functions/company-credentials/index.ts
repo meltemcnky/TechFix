@@ -20,7 +20,10 @@ function headers(request: Request) {
 }
 
 function json(request: Request, body: unknown, status = 200) {
-  return new Response(JSON.stringify(body), {
+  const payload = status >= 400 && body && typeof body === 'object' && 'error' in body && !('code' in body)
+    ? { ...body, code: `http_${status}` }
+    : body;
+  return new Response(JSON.stringify(payload), {
     status,
     headers: { ...headers(request), 'Content-Type': 'application/json', 'Cache-Control': 'no-store' },
   });
@@ -99,6 +102,7 @@ Deno.serve(async (request) => {
             const { error } = await service.from('notifications').insert({
               audience: 'admin', company_id: company.id, type: 'password_request',
               title: 'Firma şifre talebi', message: `${company.name} yeni şifre talep etti.`,
+              translation_key: 'notifications.passwordRequest', translation_params: {},
             });
             if (error && error.code !== '23505') return json(request, { error: 'Şifre talebi oluşturulamadı.' }, 500);
           }
