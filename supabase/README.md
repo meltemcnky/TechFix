@@ -45,8 +45,12 @@ server-only values in each hosted Supabase project:
 
 ```sh
 supabase secrets set ALLOWED_ORIGINS=https://your-dev.vercel.app,http://localhost:3000
+supabase secrets set ADDITIONAL_ALLOWED_ORIGINS=https://another-approved-deployment.vercel.app
 supabase secrets set TECHNICIAN_GRANT_SECRET=<at-least-32-random-characters>
 ```
+
+Use `ADDITIONAL_ALLOWED_ORIGINS` when a temporary deployment origin must be
+added without overwriting the primary allow-list.
 
 Never expose the service-role or technician grant secret through a `VITE_*`
 variable. Supabase supplies its built-in URL and API keys to hosted functions.

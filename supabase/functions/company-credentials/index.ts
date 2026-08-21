@@ -2,7 +2,8 @@ import { createClient } from 'npm:@supabase/supabase-js@2';
 import { serviceClient, requireAdmin } from '../_shared/admin.ts';
 import { normalizeCompanyName } from '../_shared/http.ts';
 
-const allowedOrigins = (Deno.env.get('ALLOWED_ORIGINS') ?? '')
+const allowedOrigins = [Deno.env.get('ALLOWED_ORIGINS'), Deno.env.get('ADDITIONAL_ALLOWED_ORIGINS')]
+  .filter(Boolean).join(',')
   .split(',').map((x) => x.trim()).filter(Boolean);
 
 function headers(request: Request) {

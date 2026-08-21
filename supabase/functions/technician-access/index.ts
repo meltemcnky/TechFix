@@ -1,7 +1,8 @@
 import bcrypt from 'npm:bcryptjs@2.4.3';
 import { requireAdmin, serviceClient } from '../_shared/admin.ts';
 
-const allowedOrigins = (Deno.env.get('ALLOWED_ORIGINS') ?? '').split(',').map((x) => x.trim()).filter(Boolean);
+const allowedOrigins = [Deno.env.get('ALLOWED_ORIGINS'), Deno.env.get('ADDITIONAL_ALLOWED_ORIGINS')]
+  .filter(Boolean).join(',').split(',').map((x) => x.trim()).filter(Boolean);
 const encoder = new TextEncoder();
 
 function cors(request: Request) {
