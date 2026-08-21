@@ -1,6 +1,6 @@
 # TechFix Supabase workflow
 
-The single baseline migration is the complete TechFix schema. The personal
+The ordered migration chain is the complete TechFix schema. The personal
 Supabase FREE project is DEV/test only; the corporate PRO project will be built
 from the same baseline without demo data.
 
@@ -34,7 +34,7 @@ Never use `supabase db reset --linked` against production. A linked reset is
 allowed only for the disposable personal DEV project after its project ref is
 verified and explicit destructive approval is received.
 
-`seed.sql` does not contain Auth users, PINs, or production data. Stable category
+`seed.sql` does not contain Auth users, passwords, PINs, or production data. Stable category
 records belong to the baseline; DEV companies are created through the secured
 `company-credentials` function.
 

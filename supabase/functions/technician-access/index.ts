@@ -33,8 +33,9 @@ async function hmac(value: string) {
   return new Uint8Array(await crypto.subtle.sign('HMAC', key, encoder.encode(value)));
 }
 async function createGrant(method: 'qr' | 'pin', version: number) {
-  const payload = b64url(encoder.encode(JSON.stringify({ method, version, exp: Date.now() + 10 * 60_000, nonce: crypto.randomUUID() })));
-  return `${payload}.${b64url(await hmac(payload))}`;
+  const expiresAt = Date.now() + 15 * 60_000;
+  const payload = b64url(encoder.encode(JSON.stringify({ method, version, exp: expiresAt, nonce: crypto.randomUUID() })));
+  return { grant: `${payload}.${b64url(await hmac(payload))}`, expiresAt };
 }
 async function verifyGrant(grant: string) {
   const [payload, signature] = grant.split('.');
@@ -82,7 +83,10 @@ Deno.serve(async (request) => {
       const { data: activeAccess } = grant
         ? await service.from('technician_access').select('credential_version,is_active').eq('is_active', true).maybeSingle()
         : { data: null };
-      if (!grant || !activeAccess?.is_active || activeAccess.credential_version !== grant.version ||
+      if (!grant || !activeAccess?.is_active || activeAccess.credential_version !== grant.version) {
+        return json(request, { error: 'Tekniker erişim süresi doldu.', code: 'grant_expired' }, 401);
+      }
+      if (
           !['electricity', 'natural_gas'].includes(meterType) ||
           (readingValue !== null && (!Number.isFinite(readingValue) || readingValue < 0)) ||
           !(photo instanceof File) || !(await isSupportedImage(photo))) {
@@ -103,6 +107,11 @@ Deno.serve(async (request) => {
         await service.storage.from('meter-photos').remove([path]);
         return json(request, { error: 'Sayaç kaydı oluşturulamadı.' }, 400);
       }
+      await service.from('notifications').insert({
+        audience: 'admin', meter_reading_id: id, type: 'meter_created',
+        title: 'Yeni sayaç kaydı',
+        message: `${meterType === 'electricity' ? 'Elektrik' : 'Doğalgaz'} sayaç kaydı oluşturuldu.`,
+      });
       return json(request, { ok: true }, 201);
     }
 
@@ -133,7 +142,7 @@ Deno.serve(async (request) => {
       await service.from('technician_access').update(method === 'qr'
         ? { last_qr_used_at: new Date().toISOString(), failed_attempts: 0, locked_until: null }
         : { last_pin_used_at: new Date().toISOString(), failed_attempts: 0, locked_until: null }).eq('id', access.id);
-      return json(request, { grant: await createGrant(method, access.credential_version) });
+      return json(request, await createGrant(method, access.credential_version));
     }
 
     if (action === 'rotate') {
@@ -144,36 +153,20 @@ Deno.serve(async (request) => {
       const { data: current } = await service.from('technician_access').select('id,qr_token_hash,fallback_pin_hash,credential_version,qr_expires_at').eq('is_active', true).maybeSingle();
       const rawQr = target === 'qr' ? b64url(crypto.getRandomValues(new Uint8Array(32))) : null;
       const pinLength = Math.min(6, Math.max(4, Number(body.pinLength ?? 6)));
-      const rawPin = target === 'pin' ? randomDigits(pinLength) : null;
+      const rawPin = randomDigits(pinLength);
       const values = {
         qr_token_hash: rawQr ? await sha256(rawQr) : current?.qr_token_hash,
-        fallback_pin_hash: rawPin ? await bcrypt.hash(rawPin, 12) : current?.fallback_pin_hash,
+        fallback_pin_hash: await bcrypt.hash(rawPin, 12),
         credential_version: Number(current?.credential_version ?? 0) + 1,
         qr_expires_at: target === 'qr' ? body.expiresAt || null : current?.qr_expires_at ?? null,
         updated_by: admin.user.id,
       };
-      if (!values.qr_token_hash || !values.fallback_pin_hash) {
-        return json(request, { error: 'İlk kurulumda QR ve PIN ayrı ayrı üretilemez; initialize kullanın.' }, 409);
-      }
+      if (!values.qr_token_hash) return json(request, { error: 'İlk işlem QR yenileme olmalıdır.' }, 409);
       const query = current
         ? service.from('technician_access').update(values).eq('id', current.id)
         : service.from('technician_access').insert({ ...values, is_active: true });
       const { error } = await query;
       return error ? json(request, { error: error.message }, 400) : json(request, { rawToken: rawQr, pin: rawPin });
-    }
-
-    if (action === 'initialize') {
-      const admin = await requireAdmin(request);
-      if (!admin) return json(request, { error: 'Yetkisiz erişim.' }, 403);
-      const { count } = await service.from('technician_access').select('id', { count: 'exact', head: true });
-      if (count) return json(request, { error: 'Tekniker erişimi zaten oluşturulmuş.' }, 409);
-      const rawToken = b64url(crypto.getRandomValues(new Uint8Array(32)));
-      const pin = randomDigits(6);
-      const { error } = await service.from('technician_access').insert({
-        qr_token_hash: await sha256(rawToken), fallback_pin_hash: await bcrypt.hash(pin, 12),
-        updated_by: admin.user.id, is_active: true,
-      });
-      return error ? json(request, { error: error.message }, 400) : json(request, { rawToken, pin }, 201);
     }
     return json(request, { error: 'Geçersiz işlem.' }, 400);
   } catch (error) {

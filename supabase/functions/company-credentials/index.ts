@@ -23,12 +23,18 @@ function json(request: Request, body: unknown, status = 200) {
   });
 }
 
-function generatePin(length = 6) {
-  const size = Math.min(8, Math.max(6, length));
-  const limit = Math.floor(0x1_0000_0000 / 10 ** size) * 10 ** size;
-  const values = new Uint32Array(1);
-  do crypto.getRandomValues(values); while (values[0] >= limit);
-  return String(values[0] % 10 ** size).padStart(size, '0');
+function generateCompanyPassword() {
+  const letters = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
+  const digits = '23456789';
+  const all = letters + digits;
+  const chars = [letters[crypto.getRandomValues(new Uint32Array(1))[0] % letters.length],
+    digits[crypto.getRandomValues(new Uint32Array(1))[0] % digits.length]];
+  while (chars.length < 8) chars.push(all[crypto.getRandomValues(new Uint32Array(1))[0] % all.length]);
+  for (let i = chars.length - 1; i > 0; i--) {
+    const j = crypto.getRandomValues(new Uint32Array(1))[0] % (i + 1);
+    [chars[i], chars[j]] = [chars[j], chars[i]];
+  }
+  return chars.join('');
 }
 
 const internalEmail = () => `company-${crypto.randomUUID()}@auth.techfix.invalid`;
@@ -44,25 +50,29 @@ Deno.serve(async (request) => {
     const action = String(body.action ?? '');
 
     if (action === 'login') {
-      const companyName = String(body.companyName ?? '');
-      const pin = String(body.pin ?? '');
-      if (!companyName.trim() || !/^\d{6,8}$/.test(pin)) {
-        return json(request, { error: 'Firma adı veya PIN hatalı.' }, 401);
-      }
+      const username = String(body.username ?? body.companyName ?? '').trim();
+      const password = String(body.password ?? body.pin ?? '');
+      if (!username || !password || password.length > 128) return json(request, { error: 'Kullanıcı adı veya şifre hatalı.' }, 401);
       const service = serviceClient();
       const { data: company } = await service.from('companies')
-        .select('id,name,auth_email,is_active')
-        .eq('normalized_name', normalizeCompanyName(companyName)).maybeSingle();
-      if (!company?.is_active || !company.auth_email) {
-        return json(request, { error: 'Firma adı veya PIN hatalı.' }, 401);
-      }
+        .select('id,name,auth_email,is_active,removed_at')
+        .eq('normalized_name', normalizeCompanyName(username)).maybeSingle();
       const publicClient = createClient(
         Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_ANON_KEY')!,
         { auth: { persistSession: false, autoRefreshToken: false } },
       );
-      const { data, error } = await publicClient.auth.signInWithPassword({ email: company.auth_email, password: pin });
-      if (error || !data.session) return json(request, { error: 'Firma adı veya PIN hatalı.' }, 401);
-      return json(request, { session: data.session, company: { id: company.id, name: company.name } });
+      if (company?.is_active && !company.removed_at && company.auth_email) {
+        const { data, error } = await publicClient.auth.signInWithPassword({ email: company.auth_email, password });
+        if (!error && data.session) return json(request, { role: 'company', session: data.session });
+      } else {
+        const { data, error } = await publicClient.auth.signInWithPassword({ email: username, password });
+        if (!error && data.session) {
+          const { data: admin } = await service.from('admin_users').select('is_active')
+            .eq('user_id', data.user.id).maybeSingle();
+          if (admin?.is_active) return json(request, { role: 'admin', session: data.session });
+        }
+      }
+      return json(request, { error: 'Kullanıcı adı veya şifre hatalı.' }, 401);
     }
 
     if (action === 'request-reset') {
@@ -73,8 +83,8 @@ Deno.serve(async (request) => {
           .eq('normalized_name', companyName).eq('is_active', true).maybeSingle();
         if (company) {
           await service.from('notifications').insert({
-            audience: 'admin', company_id: company.id, type: 'pin_request',
-            title: 'Firma PIN talebi', message: `${company.name} yeni PIN talep etti.`,
+            audience: 'admin', company_id: company.id, type: 'password_request',
+            title: 'Firma şifre talebi', message: `${company.name} yeni şifre talep etti.`,
           });
         }
       }
@@ -87,49 +97,64 @@ Deno.serve(async (request) => {
 
     if (action === 'create') {
       const name = String(body.name ?? '').trim();
-      const block = String(body.block ?? '').trim();
-      const floor = String(body.floor ?? '').trim();
-      const officeCode = String(body.officeCode ?? '').trim();
-      const pinLength = Number(body.pinLength ?? 6);
-      if (!name || !block || !floor || !officeCode || ![6, 7, 8].includes(pinLength)) {
-        return json(request, { error: 'Firma alanları geçersiz.' }, 400);
-      }
-      const pin = generatePin(pinLength);
+      const locationId = String(body.locationId ?? '');
+      if (!name || !locationId) return json(request, { error: 'Firma alanları geçersiz.' }, 400);
+      const { data: location } = await service.from('locations').select('id,block,floor,office_code,is_active').eq('id', locationId).maybeSingle();
+      const { data: occupied } = await service.from('companies').select('id').eq('location_id', locationId).is('removed_at', null).maybeSingle();
+      if (!location?.is_active || occupied) return json(request, { error: 'Lokasyon kullanılamıyor.' }, 409);
+      const password = generateCompanyPassword();
       const email = internalEmail();
       const { data: authData, error: authError } = await service.auth.admin.createUser({
-        email, password: pin, email_confirm: true,
+        email, password, email_confirm: true,
         app_metadata: { role: 'company' }, user_metadata: { company_name: name },
       });
       if (authError || !authData.user) return json(request, { error: authError?.message ?? 'Auth kullanıcısı oluşturulamadı.' }, 400);
       const { data: company, error } = await service.from('companies').insert({
         name, normalized_name: normalizeCompanyName(name), auth_email: email,
-        auth_user_id: authData.user.id, block, floor, office_code: officeCode, is_active: true,
+        auth_user_id: authData.user.id, location_id: location.id, block: location.block,
+        floor: location.floor, office_code: location.office_code, is_active: true,
       }).select('id,name').single();
       if (error) {
         await service.auth.admin.deleteUser(authData.user.id);
         return json(request, { error: error.message }, 400);
       }
-      return json(request, { company, pin }, 201);
+      return json(request, { company, password }, 201);
     }
 
     const companyId = String(body.companyId ?? '');
     const { data: company } = await service.from('companies')
-      .select('id,name,auth_user_id,auth_email').eq('id', companyId).maybeSingle();
+      .select('id,name,auth_user_id,auth_email,is_active,removed_at').eq('id', companyId).maybeSingle();
     if (!company) return json(request, { error: 'Firma bulunamadı.' }, 404);
 
     if (action === 'reset') {
       if (!company.auth_user_id) return json(request, { error: 'Firma Auth hesabı bulunamadı.' }, 409);
-      const pinLength = Number(body.pinLength ?? 6);
-      if (![6, 7, 8].includes(pinLength)) return json(request, { error: 'PIN uzunluğu geçersiz.' }, 400);
-      const pin = generatePin(pinLength);
-      const { error } = await service.auth.admin.updateUserById(company.auth_user_id, { password: pin });
+      const password = generateCompanyPassword();
+      const { error } = await service.auth.admin.updateUserById(company.auth_user_id, { password });
       if (error) return json(request, { error: error.message }, 400);
       await service.from('notifications').update({ read_at: new Date().toISOString() })
-        .eq('audience', 'admin').eq('type', 'pin_request').eq('company_id', company.id).is('read_at', null);
-      return json(request, { pin });
+        .eq('audience', 'admin').eq('type', 'password_request').eq('company_id', company.id).is('read_at', null);
+      return json(request, { password });
+    }
+
+    if (action === 'update') {
+      if (company.removed_at) return json(request, { error: 'Kaldırılmış firma değiştirilemez.' }, 409);
+      const name = String(body.name ?? '').trim();
+      const locationId = String(body.locationId ?? '');
+      const logoPath = body.logoPath ? String(body.logoPath) : null;
+      const { data: location } = await service.from('locations').select('id,block,floor,office_code,is_active').eq('id', locationId).maybeSingle();
+      const { data: occupied } = await service.from('companies').select('id').eq('location_id', locationId)
+        .is('removed_at', null).neq('id', company.id).limit(1).maybeSingle();
+      if (!name || !location?.is_active || occupied) return json(request, { error: 'Firma veya lokasyon bilgisi geçersiz.' }, 409);
+      const { error } = await service.from('companies').update({
+        name, normalized_name: normalizeCompanyName(name), location_id: location.id,
+        block: location.block, floor: location.floor, office_code: location.office_code,
+        logo_path: logoPath,
+      }).eq('id', company.id);
+      return error ? json(request, { error: error.message }, 400) : json(request, { ok: true });
     }
 
     if (action === 'set-active' && typeof body.isActive === 'boolean') {
+      if (company.removed_at) return json(request, { error: 'Kaldırılmış firma değiştirilemez.' }, 409);
       const { error } = await service.from('companies').update({ is_active: body.isActive }).eq('id', company.id);
       if (!error && company.auth_user_id) {
         await service.auth.admin.updateUserById(company.auth_user_id, {
@@ -137,6 +162,16 @@ Deno.serve(async (request) => {
         });
       }
       return error ? json(request, { error: error.message }, 400) : json(request, { ok: true });
+    }
+
+    if (action === 'remove') {
+      if (company.is_active || company.removed_at) return json(request, { error: 'Firma önce pasife alınmalıdır.' }, 409);
+      const { error } = await service.from('companies').update({
+        removed_at: new Date().toISOString(), removed_by: admin.user.id, location_id: null,
+      }).eq('id', company.id).eq('is_active', false).is('removed_at', null);
+      if (error) return json(request, { error: error.message }, 400);
+      if (company.auth_user_id) await service.auth.admin.deleteUser(company.auth_user_id);
+      return json(request, { ok: true });
     }
 
     return json(request, { error: 'Geçersiz işlem.' }, 400);

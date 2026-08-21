@@ -8,6 +8,8 @@ export const supabase = createClient(url || 'https://invalid.supabase.co', anonK
   auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true },
 });
 
+export class ApiError extends Error { constructor(message:string,public code?:string,public status?:number){super(message);this.name='ApiError'} }
+
 export async function invoke<T>(name: string, options?: { body?: unknown; method?: string; query?: URLSearchParams }) {
   if (!url || !anonKey) throw new Error('Supabase ortam değişkenleri tanımlı değil.');
   const { data: { session } } = await supabase.auth.getSession();
@@ -23,6 +25,6 @@ export async function invoke<T>(name: string, options?: { body?: unknown; method
     body: options?.body instanceof FormData ? options.body : options?.body ? JSON.stringify(options.body) : undefined,
   });
   const payload = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(payload.error || 'İşlem tamamlanamadı.');
+  if (!response.ok) throw new ApiError(payload.error || 'İşlem tamamlanamadı.',payload.code,response.status);
   return payload as T;
 }

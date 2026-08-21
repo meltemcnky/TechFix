@@ -10,7 +10,7 @@ No application server, Docker runtime, or local Supabase stack is required.
 
 ## Current DEV deployment status
 
-As of 2026-08-20, the Vercel Production deployment is live and reports
+As of 2026-08-21, the Vercel Production deployment is live and reports
 `Ready`. Vercel has the public `VITE_SUPABASE_URL` and
 `VITE_SUPABASE_ANON_KEY` build variables configured.
 
@@ -21,12 +21,14 @@ environment files are intentionally not recorded in Git.
 
 ## Technician QR operation
 
-TechFix does not generate QR images, PDFs, or simulator output in the web
-application. The single physical QR is prepared outside the application and
-contains `/tekniker#token=<server-generated-token>` on the approved production
-origin. A valid token is exchanged by `technician-access` for a short-lived,
-meter-submit-only grant; the token is never stored in the frontend bundle or a
-`VITE_*` variable. Opening `/tekniker` without the QR uses the fallback PIN.
+TechFix has no public QR generator, PDF flow, or simulator. An authenticated
+admin can rotate the single physical QR and fallback PIN, preview the resulting
+QR+PIN sheet, and download it as PNG for the meter cabinet. The QR contains
+`/tekniker#token=<server-generated-token>` on the configured public origin. A
+valid token is exchanged by `technician-access` for a 15-minute,
+meter-submit-only grant; the raw token is never stored in the frontend bundle
+or a `VITE_*` variable. Opening `/tekniker` without the QR uses the fallback
+PIN.
 
 ## Environments
 

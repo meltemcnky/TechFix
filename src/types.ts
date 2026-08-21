@@ -1,8 +1,10 @@
 export type Role = 'guest' | 'company' | 'admin';
 export type Company = {
   id: string; name: string; block: string | null; floor: string | null; office_code: string | null;
-  logo_path: string | null; is_active: boolean; auth_user_id?: string | null;
+  logo_path: string | null; is_active: boolean; auth_user_id?: string | null; location_id: string | null;
+  removed_at: string | null;
 };
+export type Location = { id:string; block:string; floor:string; office_code:string; is_active:boolean; companies?: Pick<Company,'id'|'name'|'is_active'|'removed_at'>[] };
 export type Category = { id: string; code: string; name: string; is_active: boolean; sort_order: number };
 export type TicketStatus = 'new' | 'under_review' | 'in_progress' | 'resolved' | 'archived';
 export type Ticket = {
@@ -11,8 +13,8 @@ export type Ticket = {
   companies?: Pick<Company, 'name' | 'block' | 'floor' | 'office_code'> | null; categories?: Pick<Category, 'name'> | null;
 };
 export type Notification = {
-  id: string; audience: 'admin' | 'company'; company_id: string; ticket_id: string | null;
-  type: 'ticket_updated' | 'pin_request'; title: string; message: string; read_at: string | null; created_at: string;
+  id: string; audience: 'admin' | 'company'; company_id: string | null; ticket_id: string | null;
+  meter_reading_id: string | null; type: 'ticket_updated' | 'password_request' | 'meter_created'; title: string; message: string; read_at: string | null; created_at: string;
   companies?: Pick<Company, 'name'> | null;
 };
 export type MeterReading = {

@@ -12,5 +12,5 @@ export function json(body: unknown, status = 200) {
 }
 
 export function normalizeCompanyName(value: string) {
-  return value.trim().replace(/\s+/g, ' ').toLowerCase();
+  return value.trim().replace(/\s+/g, ' ').toLocaleLowerCase('tr-TR');
 }
