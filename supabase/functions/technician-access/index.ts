@@ -61,14 +61,22 @@ function randomDigits(length: number) {
   do crypto.getRandomValues(values); while (values[0] >= limit);
   return String(values[0] % base).padStart(length, '0');
 }
-async function isSupportedImage(file: File) {
-  if (file.type !== 'image/webp' || file.size === 0 || file.size > 5 * 1024 * 1024) return false;
+async function supportedImageKind(file: File) {
+  if (!['image/webp', 'image/jpeg'].includes(file.type) || file.size === 0 || file.size > 5 * 1024 * 1024) return null;
   const header = new Uint8Array(await file.slice(0, 12).arrayBuffer());
-  return new TextDecoder().decode(header.slice(0, 4)) === 'RIFF'
+  const webp = new TextDecoder().decode(header.slice(0, 4)) === 'RIFF'
     && new TextDecoder().decode(header.slice(8, 12)) === 'WEBP';
+  if (file.type === 'image/webp' && webp) return 'webp' as const;
+  const jpeg = header[0] === 0xff && header[1] === 0xd8 && header[2] === 0xff;
+  return file.type === 'image/jpeg' && jpeg ? 'jpg' as const : null;
+}
+function meterFailure(request: Request, requestId: string, code: string, message: string, stage: string, details?: Record<string, unknown>) {
+  console.error(JSON.stringify({ requestId, code, stage, ...details }));
+  return json(request, { error: message, code, requestId }, 400);
 }
 
 Deno.serve(async (request) => {
+  const requestId = crypto.randomUUID();
   if (request.method === 'OPTIONS') return new Response('ok', { headers: cors(request) });
   if (request.method !== 'POST') return json(request, { error: 'Method not allowed' }, 405);
   const origin = request.headers.get('origin');
@@ -81,43 +89,50 @@ Deno.serve(async (request) => {
       const grant = await verifyGrant(String(form.get('grant') ?? ''));
       const meterType = String(form.get('meterType') ?? '');
       const rawValue = String(form.get('readingValue') ?? '').trim();
-      const readingValue = rawValue === '' ? null : Number(rawValue);
+      const normalizedValue = rawValue.replace(',', '.');
+      const readingValue = normalizedValue === '' ? null : Number(normalizedValue);
       const notes = String(form.get('notes') ?? '').trim().slice(0, 2000) || null;
       const photo = form.get('photo');
       const { data: activeAccess } = grant
         ? await service.from('technician_access').select('credential_version,is_active').eq('is_active', true).maybeSingle()
         : { data: null };
       if (!grant || !activeAccess?.is_active || activeAccess.credential_version !== grant.version) {
-        return json(request, { error: 'Tekniker erişim süresi doldu.', code: 'grant_expired' }, 401);
+        return json(request, { error: 'Tekniker erişim süresi doldu.', code: 'grant_expired', requestId }, 401);
       }
-      if (
-          !['electricity', 'natural_gas'].includes(meterType) ||
-          (readingValue !== null && (!Number.isFinite(readingValue) || readingValue < 0)) ||
-          !(photo instanceof File) || !(await isSupportedImage(photo))) {
-        return json(request, { error: 'Gönderim alanları veya erişim süresi geçersiz.' }, 400);
-      }
+      if (!['electricity', 'natural_gas'].includes(meterType))
+        return meterFailure(request, requestId, 'invalid_meter_type', 'Sayaç türü geçersiz.', 'validation', { meterType });
+      if (readingValue !== null && (!Number.isFinite(readingValue) || readingValue < 0))
+        return meterFailure(request, requestId, 'invalid_reading_value', 'Sayaç değeri geçersiz.', 'validation');
+      if (!(photo instanceof File))
+        return meterFailure(request, requestId, 'invalid_photo', 'Sayaç fotoğrafı geçersiz.', 'validation');
+      if (photo.size === 0 || photo.size > 5 * 1024 * 1024)
+        return meterFailure(request, requestId, 'photo_too_large', 'Sayaç fotoğrafı boş veya 5 MB sınırını aşıyor.', 'validation', { size: photo.size });
+      const imageKind = await supportedImageKind(photo);
+      if (!imageKind)
+        return meterFailure(request, requestId, 'invalid_photo', 'Sayaç fotoğrafı biçimi geçersiz.', 'validation', { mime: photo.type, size: photo.size });
       const id = crypto.randomUUID();
       const now = new Date();
-      const path = `${now.getUTCFullYear()}/${String(now.getUTCMonth() + 1).padStart(2, '0')}/${id}.webp`;
+      const path = `${now.getUTCFullYear()}/${String(now.getUTCMonth() + 1).padStart(2, '0')}/${id}.${imageKind}`;
       const { error: uploadError } = await service.storage.from('meter-photos').upload(path, photo, {
-        contentType: 'image/webp', upsert: false, cacheControl: '3600',
+        contentType: photo.type, upsert: false, cacheControl: '3600',
       });
-      if (uploadError) return json(request, { error: 'Fotoğraf yüklenemedi.' }, 400);
+      if (uploadError) return meterFailure(request, requestId, 'photo_upload_failed', 'Fotoğraf yüklenemedi.', 'storage', { message: uploadError.message, mime: photo.type, size: photo.size });
       const { error } = await service.from('meter_readings').insert({
         id, meter_type: meterType, photo_path: path,
         reading_value: readingValue, notes, access_method: grant.method,
       });
       if (error) {
         await service.storage.from('meter-photos').remove([path]);
-        return json(request, { error: 'Sayaç kaydı oluşturulamadı.' }, 400);
+        return meterFailure(request, requestId, 'meter_insert_failed', 'Sayaç kaydı oluşturulamadı.', 'database', { message: error.message });
       }
-      await service.from('notifications').insert({
+      const { error: notificationError } = await service.from('notifications').insert({
         audience: 'admin', meter_reading_id: id, type: 'meter_created',
         title: 'Yeni sayaç kaydı',
         message: `${meterType === 'electricity' ? 'Elektrik' : 'Doğalgaz'} sayaç kaydı oluşturuldu.`,
         translation_key: 'notifications.meterCreated', translation_params: { meterType },
       });
-      return json(request, { ok: true }, 201);
+      if (notificationError) console.error(JSON.stringify({ requestId, code: 'notification_insert_failed', stage: 'notification', message: notificationError.message }));
+      return json(request, { ok: true, requestId }, 201);
     }
 
     const body = await request.json();

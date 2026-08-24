@@ -691,7 +691,7 @@ function TicketCreate({
         path = `${company.id}/${id}/${webp.name}`;
         const { error } = await supabase.storage
           .from("ticket-photos")
-          .upload(path, webp, { contentType: "image/webp" });
+          .upload(path, webp, { contentType: webp.type });
         if (error) throw error;
       }
       const { error } = await supabase
@@ -750,7 +750,7 @@ function TicketCreate({
           className={`${field} mt-2`}
           name="photo"
           type="file"
-          accept="image/jpeg,image/png,image/webp"
+          accept="image/jpeg,image/png,image/webp,image/heic,image/heif"
         />
       </label>
       <ErrorMessage text={error} />
@@ -2157,7 +2157,7 @@ function TechnicianForm({
           className={`${field} mt-2`}
           name="photo"
           type="file"
-          accept="image/jpeg,image/png,image/webp"
+          accept="image/jpeg,image/png,image/webp,image/heic,image/heif"
           capture="environment"
           required
         />
