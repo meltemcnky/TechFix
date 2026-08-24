@@ -123,6 +123,9 @@ verify_jwt = false
 [functions.technician-access]
 verify_jwt = false
 
+[functions.admin-ticket-update]
+verify_jwt = false
+
 # Hosted bucket definitions and access policies live in SQL migrations.
 
 # Allow connections via S3 compatible clients

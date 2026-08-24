@@ -1,5 +1,5 @@
 import { createClient } from 'npm:@supabase/supabase-js@2';
-import { serviceClient, requireAdmin } from '../_shared/admin.ts';
+import { serviceClient, requireAdmin, requireCompany } from '../_shared/admin.ts';
 import { normalizeCompanyName } from '../_shared/http.ts';
 
 const allowedOrigins = [Deno.env.get('ALLOWED_ORIGINS'), Deno.env.get('ADDITIONAL_ALLOWED_ORIGINS')]
@@ -7,6 +7,12 @@ const allowedOrigins = [Deno.env.get('ALLOWED_ORIGINS'), Deno.env.get('ADDITIONA
   .split(',').map((x) => x.trim()).filter(Boolean);
 const adminLoginUsername = (Deno.env.get('ADMIN_LOGIN_USERNAME') ?? '').trim();
 const adminAuthEmail = (Deno.env.get('ADMIN_AUTH_EMAIL') ?? '').trim();
+const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+function normalizeEmail(value: unknown) {
+  const email = String(value ?? '').trim().toLocaleLowerCase('en-US');
+  return email.length <= 254 && emailPattern.test(email) ? email : null;
+}
 
 function headers(request: Request) {
   const origin = request.headers.get('origin') ?? '';
@@ -43,8 +49,6 @@ function generateCompanyPassword() {
   return chars.join('');
 }
 
-const internalEmail = () => `company-${crypto.randomUUID()}@auth.techfix.invalid`;
-
 Deno.serve(async (request) => {
   if (request.method === 'OPTIONS') return new Response('ok', { headers: headers(request) });
   if (request.method !== 'POST') return json(request, { error: 'Method not allowed' }, 405);
@@ -60,26 +64,29 @@ Deno.serve(async (request) => {
       const password = String(body.password ?? body.pin ?? '');
       if (!username || !password || password.length > 128) return json(request, { error: 'Kullanıcı adı veya şifre hatalı.' }, 401);
       const service = serviceClient();
-      const { data: company } = await service.from('companies')
-        .select('id,name,auth_email,is_active,removed_at')
-        .eq('normalized_name', normalizeCompanyName(username)).maybeSingle();
       const publicClient = createClient(
         Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_ANON_KEY')!,
         { auth: { persistSession: false, autoRefreshToken: false } },
       );
-      if (company?.is_active && !company.removed_at && company.auth_email) {
-        const { data, error } = await publicClient.auth.signInWithPassword({ email: company.auth_email, password });
-        if (!error && data.session) return json(request, { role: 'company', session: data.session });
-      } else {
-        const loginEmail = adminLoginUsername && adminAuthEmail && username === adminLoginUsername
-          ? adminAuthEmail
-          : username;
-        const { data, error } = await publicClient.auth.signInWithPassword({ email: loginEmail, password });
-        if (!error && data.session) {
-          const { data: admin } = await service.from('admin_users').select('is_active')
-            .eq('user_id', data.user.id).maybeSingle();
-          if (admin?.is_active) return json(request, { role: 'admin', session: data.session });
-        }
+      let loginEmail = username;
+      if (!username.includes('@')) {
+        const { data: legacyCompany } = await service.from('companies')
+          .select('email,auth_email,is_active,removed_at')
+          .eq('normalized_name', normalizeCompanyName(username)).maybeSingle();
+        if (legacyCompany?.is_active && !legacyCompany.removed_at)
+          loginEmail = legacyCompany.email ?? legacyCompany.auth_email ?? '';
+        else if (adminLoginUsername && adminAuthEmail && username === adminLoginUsername)
+          loginEmail = adminAuthEmail;
+      }
+      const { data, error } = await publicClient.auth.signInWithPassword({ email: loginEmail, password });
+      if (!error && data.session) {
+        const [{ data: admin }, { data: company }] = await Promise.all([
+          service.from('admin_users').select('is_active').eq('user_id', data.user.id).maybeSingle(),
+          service.from('companies').select('is_active,removed_at').eq('auth_user_id', data.user.id).maybeSingle(),
+        ]);
+        if (admin?.is_active) return json(request, { role: 'admin', session: data.session });
+        if (company?.is_active && !company.removed_at)
+          return json(request, { role: 'company', session: data.session });
       }
       return json(request, { error: 'Kullanıcı adı veya şifre hatalı.' }, 401);
     }
@@ -90,10 +97,15 @@ Deno.serve(async (request) => {
       if (!username || username.length > 254) {
         return json(request, { ok: true, accountType: 'unknown', message: 'Bilgiler eşleşiyorsa şifre yenileme işlemi başlatıldı.' });
       }
+      const companyEmail = normalizeEmail(username);
       const companyName = normalizeCompanyName(username);
       if (companyName) {
-        const { data: company } = await service.from('companies').select('id,name')
-          .eq('normalized_name', companyName).eq('is_active', true).is('removed_at', null).maybeSingle();
+        let companyQuery = service.from('companies').select('id,name')
+          .eq('is_active', true).is('removed_at', null);
+        companyQuery = companyEmail
+          ? companyQuery.eq('email', companyEmail)
+          : companyQuery.eq('normalized_name', companyName);
+        const { data: company } = await companyQuery.maybeSingle();
         if (company) {
           const { data: openRequest } = await service.from('notifications').select('id')
             .eq('audience', 'admin').eq('type', 'password_request').eq('company_id', company.id)
@@ -133,26 +145,54 @@ Deno.serve(async (request) => {
       return json(request, { ok: true, accountType: 'unknown', message: 'Bilgiler eşleşiyorsa şifre yenileme işlemi başlatıldı.' });
     }
 
+    if (action === 'update_company_email') {
+      const authenticated = await requireCompany(request);
+      if (!authenticated) return json(request, { error: 'Yetkisiz erişim.' }, 403);
+      const nextEmail = normalizeEmail(body.email);
+      const currentPassword = String(body.currentPassword ?? '');
+      if (!nextEmail || !currentPassword || currentPassword.length > 128)
+        return json(request, { error: 'E-posta veya şifre geçersiz.' }, 400);
+      const currentEmail = authenticated.company.email ?? authenticated.user.email;
+      if (!currentEmail) return json(request, { error: 'Firma e-postası yapılandırılmamış.' }, 409);
+      if (nextEmail === currentEmail.toLocaleLowerCase('en-US'))
+        return json(request, { error: 'Yeni e-posta mevcut e-posta ile aynı.' }, 409);
+      const publicClient = createClient(
+        Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_ANON_KEY')!,
+        { auth: { persistSession: false, autoRefreshToken: false } },
+      );
+      const { error: passwordError } = await publicClient.auth.signInWithPassword({
+        email: currentEmail, password: currentPassword,
+      });
+      if (passwordError) return json(request, { error: 'Mevcut şifre hatalı.' }, 401);
+      const { error } = await authenticated.service.auth.admin.updateUserById(
+        authenticated.user.id, { email: nextEmail, email_confirm: true },
+      );
+      return error
+        ? json(request, { error: 'E-posta adresi kullanılamıyor.' }, 409)
+        : json(request, { ok: true, email: nextEmail });
+    }
+
     const admin = await requireAdmin(request);
     if (!admin) return json(request, { error: 'Yetkisiz erişim.' }, 403);
     const { service } = admin;
 
     if (action === 'create') {
       const name = String(body.name ?? '').trim();
+      const corporateEmail = normalizeEmail(body.email);
       const locationId = String(body.locationId ?? '');
-      if (!name || !locationId) return json(request, { error: 'Firma alanları geçersiz.' }, 400);
+      if (!name || !corporateEmail || !locationId) return json(request, { error: 'Firma alanları geçersiz.' }, 400);
       const { data: location } = await service.from('locations').select('id,block,floor,office_code,is_active').eq('id', locationId).maybeSingle();
       const { data: occupied } = await service.from('companies').select('id').eq('location_id', locationId).is('removed_at', null).maybeSingle();
       if (!location?.is_active || occupied) return json(request, { error: 'Lokasyon kullanılamıyor.' }, 409);
       const password = generateCompanyPassword();
-      const email = internalEmail();
       const { data: authData, error: authError } = await service.auth.admin.createUser({
-        email, password, email_confirm: true,
+        email: corporateEmail, password, email_confirm: true,
         app_metadata: { role: 'company' }, user_metadata: { company_name: name },
       });
       if (authError || !authData.user) return json(request, { error: authError?.message ?? 'Auth kullanıcısı oluşturulamadı.' }, 400);
       const { data: company, error } = await service.from('companies').insert({
-        name, normalized_name: normalizeCompanyName(name), auth_email: email,
+        name, normalized_name: normalizeCompanyName(name), auth_email: corporateEmail,
+        email: corporateEmail,
         auth_user_id: authData.user.id, location_id: location.id, block: location.block,
         floor: location.floor, office_code: location.office_code, is_active: true,
       }).select('id,name').single();
@@ -165,7 +205,7 @@ Deno.serve(async (request) => {
 
     const companyId = String(body.companyId ?? '');
     const { data: company } = await service.from('companies')
-      .select('id,name,auth_user_id,auth_email,is_active,removed_at').eq('id', companyId).maybeSingle();
+      .select('id,name,email,auth_user_id,auth_email,is_active,removed_at').eq('id', companyId).maybeSingle();
     if (!company) return json(request, { error: 'Firma bulunamadı.' }, 404);
 
     if (action === 'reset') {
@@ -178,15 +218,35 @@ Deno.serve(async (request) => {
       return json(request, { password });
     }
 
+    if (action === 'set-email') {
+      if (company.removed_at) return json(request, { error: 'Kaldırılmış firma değiştirilemez.' }, 409);
+      if (!company.auth_user_id) return json(request, { error: 'Firma Auth hesabı bulunamadı.' }, 409);
+      const nextEmail = normalizeEmail(body.email);
+      if (!nextEmail) return json(request, { error: 'E-posta adresi geçersiz.' }, 400);
+      const { error } = await service.auth.admin.updateUserById(company.auth_user_id, {
+        email: nextEmail, email_confirm: true,
+      });
+      return error
+        ? json(request, { error: 'E-posta adresi kullanılamıyor.' }, 409)
+        : json(request, { ok: true, email: nextEmail });
+    }
+
     if (action === 'update') {
       if (company.removed_at) return json(request, { error: 'Kaldırılmış firma değiştirilemez.' }, 409);
       const name = String(body.name ?? '').trim();
+      const nextEmail = normalizeEmail(body.email);
       const locationId = String(body.locationId ?? '');
       const logoPath = body.logoPath ? String(body.logoPath) : null;
       const { data: location } = await service.from('locations').select('id,block,floor,office_code,is_active').eq('id', locationId).maybeSingle();
       const { data: occupied } = await service.from('companies').select('id').eq('location_id', locationId)
         .is('removed_at', null).neq('id', company.id).limit(1).maybeSingle();
-      if (!name || !location?.is_active || occupied) return json(request, { error: 'Firma veya lokasyon bilgisi geçersiz.' }, 409);
+      if (!name || !nextEmail || !location?.is_active || occupied) return json(request, { error: 'Firma veya lokasyon bilgisi geçersiz.' }, 409);
+      if (nextEmail !== company.email && company.auth_user_id) {
+        const { error: emailError } = await service.auth.admin.updateUserById(company.auth_user_id, {
+          email: nextEmail, email_confirm: true,
+        });
+        if (emailError) return json(request, { error: 'E-posta adresi kullanılamıyor.' }, 409);
+      }
       const { error } = await service.from('companies').update({
         name, normalized_name: normalizeCompanyName(name), location_id: location.id,
         block: location.block, floor: location.floor, office_code: location.office_code,

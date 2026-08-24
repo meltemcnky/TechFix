@@ -1,7 +1,7 @@
 export type Role = 'guest' | 'company' | 'admin';
 export type Company = {
   id: string; name: string; block: string | null; floor: string | null; office_code: string | null;
-  logo_path: string | null; is_active: boolean; auth_user_id?: string | null; location_id: string | null;
+  email: string | null; logo_path: string | null; is_active: boolean; auth_user_id?: string | null; location_id: string | null;
   removed_at: string | null;
 };
 export type Location = { id:string; block:string; floor:string; office_code:string; is_active:boolean; companies?: Pick<Company,'id'|'name'|'is_active'|'removed_at'>[] };

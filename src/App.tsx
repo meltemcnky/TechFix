@@ -236,6 +236,7 @@ function Shell({
           ["/firma", t("nav.home")],
           ["/firma/ariza-bildir", t("nav.createTicket")],
           ["/firma/talepler", t("nav.myTickets")],
+          ["/firma/hesap", t("nav.account")],
         ]
       : [
           ["/admin/dashboard", t("nav.dashboard")],
@@ -418,7 +419,9 @@ function Login({ go }: { go: (path: string) => void }) {
           className={field}
           name="username"
           autoComplete="username"
-          placeholder={t("auth.username")}
+          inputMode="email"
+          autoCapitalize="none"
+          placeholder={t("auth.emailTransition")}
           required
         />
         {!reset ? (
@@ -600,7 +603,62 @@ function CompanyArea({
         <TicketList companyId={company.id} initialId={search.get("ticket")} />
       </>
     );
+  if (path === "/firma/hesap") return <CompanyAccount company={company} go={go} />;
   return <CompanyHome company={company} go={go} />;
+}
+
+function CompanyAccount({ company, go }: { company: Company; go: (path: string) => void }) {
+  const { t } = useTranslation();
+  const toast = useToast();
+  const [currentEmail, setCurrentEmail] = useState(company.email ?? "");
+  const [busy, setBusy] = useState(false);
+  const submit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const data = new FormData(form);
+    setBusy(true);
+    try {
+      const result = await invoke<{ email: string }>("company-credentials", {
+        body: {
+          action: "update_company_email",
+          email: data.get("email"),
+          currentPassword: data.get("currentPassword"),
+        },
+      });
+      setCurrentEmail(result.email);
+      form.reset();
+      toast.show(t("account.emailUpdated"));
+      await supabase.auth.signOut();
+      go("/giris");
+    } catch (cause) {
+      toast.show(err(cause), "error");
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <div className="mx-auto max-w-xl">
+      <PageTitle title={t("account.title")} />
+      <form className={`${panel} space-y-4`} onSubmit={submit}>
+        <label className="block text-sm font-semibold text-slate-700">
+          {t("account.currentEmail")}
+          <input className={`${field} mt-1`} value={currentEmail || t("account.emailMissing")} readOnly />
+        </label>
+        <label className="block text-sm font-semibold text-slate-700">
+          {t("account.newEmail")}
+          <input className={`${field} mt-1`} name="email" type="email" autoComplete="email" required />
+        </label>
+        <label className="block text-sm font-semibold text-slate-700">
+          {t("account.currentPassword")}
+          <input className={`${field} mt-1`} name="currentPassword" type="password" autoComplete="current-password" required />
+        </label>
+        <button className={primary} disabled={busy || !currentEmail}>
+          {busy ? t("common.saving") : t("account.changeEmail")}
+        </button>
+        {!currentEmail ? <p className="text-sm text-amber-700">{t("account.contactAdmin")}</p> : null}
+      </form>
+    </div>
+  );
 }
 function CompanyHome({
   company,
@@ -1111,6 +1169,7 @@ function AdminTickets({ initialId }: { initialId: string | null }) {
   const [companies, setCompanies] = useState<Company[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
   const [open, setOpen] = useState(initialId);
+  const [emailFailures, setEmailFailures] = useState<Record<string, string>>({});
   const load = () => {
     let query = supabase
       .from("tickets")
@@ -1149,18 +1208,40 @@ function AdminTickets({ initialId }: { initialId: string | null }) {
     event.preventDefault();
     const data = new FormData(event.currentTarget);
     const next = String(data.get("status")) as TicketStatus;
-    const { error } = await supabase
-      .from("tickets")
-      .update({
-        status: next,
-        admin_public_note: String(data.get("note") ?? "") || null,
-        resolved_at: next === "resolved" ? new Date().toISOString() : null,
-      })
-      .eq("id", id);
-    if (error) toast.show(error.message, "error");
-    else {
-      toast.show(tx("ticket.saved"));
+    try {
+      const result = await invoke<{
+        email: { status: "sent" | "failed" | "skipped"; deliveryId?: string };
+      }>("admin-ticket-update", {
+        body: {
+          action: "update_ticket",
+          ticketId: id,
+          status: next,
+          adminPublicNote: String(data.get("note") ?? ""),
+          sendEmail: data.get("sendEmail") === "on",
+        },
+      });
+      if (result.email.status === "failed" && result.email.deliveryId) {
+        setEmailFailures((x) => ({ ...x, [id]: result.email.deliveryId! }));
+        toast.show(tx("ticket.savedEmailFailed"), "info");
+      } else {
+        setEmailFailures((x) => { const nextFailures = { ...x }; delete nextFailures[id]; return nextFailures; });
+        toast.show(result.email.status === "sent" ? tx("ticket.savedEmailSent") : tx("ticket.saved"));
+      }
       load();
+      notifyChanged();
+    } catch (cause) {
+      toast.show(err(cause), "error");
+    }
+  };
+  const retryEmail = async (ticketId: string) => {
+    const deliveryId = emailFailures[ticketId];
+    if (!deliveryId) return;
+    try {
+      await invoke("admin-ticket-update", { body: { action: "retry_email", deliveryId } });
+      setEmailFailures((x) => { const nextFailures = { ...x }; delete nextFailures[ticketId]; return nextFailures; });
+      toast.show(tx("ticket.emailRetrySent"));
+    } catch {
+      toast.show(tx("ticket.emailRetryFailed"), "error");
     }
   };
   const exportCsv = () => {
@@ -1298,6 +1379,15 @@ function AdminTickets({ initialId }: { initialId: string | null }) {
                     />
                     <button className={primary}>{tx("ticket.update")}</button>
                   </div>
+                  <label className="flex items-center gap-2 text-sm font-semibold text-slate-700">
+                    <input name="sendEmail" type="checkbox" defaultChecked />
+                    {tx("ticket.sendEmail")}
+                  </label>
+                  {emailFailures[ticket.id] ? (
+                    <button type="button" className="btn-secondary" onClick={() => void retryEmail(ticket.id)}>
+                      {tx("ticket.retryEmail")}
+                    </button>
+                  ) : null}
                 </div>
               ) : null}
             </form>
@@ -1526,6 +1616,7 @@ function AdminCompanies({ initialId }: { initialId: string | null }) {
   const create = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const form = event.currentTarget;
+    const formData = new FormData(form);
     try {
       const result = await invoke<{
         company: { id: string };
@@ -1533,7 +1624,8 @@ function AdminCompanies({ initialId }: { initialId: string | null }) {
       }>("company-credentials", {
         body: {
           action: "create",
-          name: new FormData(form).get("name"),
+          name: formData.get("name"),
+          email: formData.get("email"),
           locationId: newLocation,
         },
       });
@@ -1609,6 +1701,7 @@ function AdminCompanies({ initialId }: { initialId: string | null }) {
           action: "update",
           companyId: company.id,
           name,
+          email: data.get("email"),
           locationId: location.id,
           logoPath: company.logo_path,
         },
@@ -1624,7 +1717,7 @@ function AdminCompanies({ initialId }: { initialId: string | null }) {
     <div>
       <PageTitle title={t("company.title")} />
       <div className="space-y-6">
-        <form className={`${panel} grid gap-3 md:grid-cols-[1fr_2fr_auto] md:items-end`} onSubmit={create}>
+        <form className={`${panel} grid gap-3 md:grid-cols-2 xl:grid-cols-[1fr_1fr_2fr_auto] xl:items-end`} onSubmit={create}>
           <label className="text-sm font-semibold text-slate-700">
             {t("company.name")}
           <input
@@ -1633,6 +1726,10 @@ function AdminCompanies({ initialId }: { initialId: string | null }) {
             placeholder={t("company.name")}
             required
           />
+          </label>
+          <label className="text-sm font-semibold text-slate-700">
+            {t("company.email")}
+            <input className={`${field} mt-1`} name="email" type="email" autoComplete="email" placeholder={t("company.email")} required />
           </label>
           <LocationPicker
             locations={locations}
@@ -1741,6 +1838,7 @@ function CompanyCard({
         </OverflowMenu>
       </div>
       <p className="text-sm text-slate-500">{location || "—"}</p>
+      <p className="break-all text-sm text-slate-600">{company.email || t("company.emailMissing")}</p>
       {password ? (
         <div className="flex items-center justify-between rounded-xl border border-emerald-200 bg-emerald-50 p-3">
           <div>
@@ -1784,13 +1882,15 @@ function EditCompanyDialog({
 }) {
   const { t } = useTranslation();
   const [name, setName] = useState("");
+  const [email, setEmail] = useState("");
   const [locationId, setLocationId] = useState("");
   useEffect(() => {
     setName(company?.name ?? "");
+    setEmail(company?.email ?? "");
     setLocationId(company?.location_id ?? "");
   }, [company]);
   if (!company) return null;
-  const dirty = name.trim() !== company.name || locationId !== (company.location_id ?? "");
+  const dirty = name.trim() !== company.name || email.trim() !== (company.email ?? "") || locationId !== (company.location_id ?? "");
   return (
     <div className="fixed inset-0 z-[90] grid place-items-center bg-slate-950/55 p-4" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
       <form className="w-full max-w-lg space-y-4 rounded-2xl bg-white p-6 shadow-2xl" onSubmit={(e) => void onSave(e, company, locationId)}>
@@ -1802,10 +1902,14 @@ function EditCompanyDialog({
           {t("company.name")}
           <input className={`${field} mt-1`} name="name" value={name} onChange={(e) => setName(e.target.value)} minLength={2} maxLength={160} required />
         </label>
+        <label className="block text-sm font-semibold text-slate-700">
+          {t("company.email")}
+          <input className={`${field} mt-1`} name="email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} maxLength={254} required />
+        </label>
         <LocationPicker locations={locations} value={locationId} onChange={setLocationId} currentCompanyId={company.id} />
         <div className="flex justify-end gap-2">
           <button type="button" className="btn-secondary" onClick={onClose}>{t("common.cancel")}</button>
-          <button className={primary} disabled={!dirty || !name.trim() || !locationId}>{t("common.save")}</button>
+          <button className={primary} disabled={!dirty || !name.trim() || !email.trim() || !locationId}>{t("common.save")}</button>
         </div>
       </form>
     </div>
