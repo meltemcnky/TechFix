@@ -14,7 +14,9 @@ export type Ticket = {
 };
 export type Notification = {
   id: string; audience: 'admin' | 'company'; company_id: string | null; ticket_id: string | null;
-  meter_reading_id: string | null; type: 'ticket_updated' | 'password_request' | 'meter_created'; title: string; message: string; read_at: string | null; created_at: string;
+  meter_reading_id: string | null; type: 'ticket_updated' | 'password_request' | 'meter_created'
+    | 'company_password_changed' | 'company_email_changed' | 'company_info_changed' | 'company_status_changed';
+  title: string; message: string; read_at: string | null; created_at: string;
   translation_key: string; translation_params: Record<string, string>;
   companies?: Pick<Company, 'name'> | null;
 };

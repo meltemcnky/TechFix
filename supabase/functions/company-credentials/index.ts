@@ -1,6 +1,7 @@
 import { createClient } from 'npm:@supabase/supabase-js@2';
-import { serviceClient, requireAdmin, requireCompany } from '../_shared/admin.ts';
+import { authenticatedClient, serviceClient, requireAdmin, requireCompany } from '../_shared/admin.ts';
 import { normalizeCompanyName } from '../_shared/http.ts';
+import { deliverCompanyEmail, type EmailResult } from '../_shared/company-email.ts';
 
 const allowedOrigins = [Deno.env.get('ALLOWED_ORIGINS'), Deno.env.get('ADDITIONAL_ALLOWED_ORIGINS')]
   .filter(Boolean).join(',')
@@ -47,6 +48,57 @@ function generateCompanyPassword() {
     [chars[i], chars[j]] = [chars[j], chars[i]];
   }
   return chars.join('');
+}
+
+type CompanyEvent = {
+  type: 'company_password_changed' | 'company_email_changed' | 'company_info_changed' | 'company_status_changed';
+  title: string;
+  message: string;
+  translationKey: string;
+  translationParams?: Record<string, string>;
+  emailSubject: string;
+  emailMessage: string;
+  emailRequested?: boolean;
+  sensitiveEmailMessage?: string;
+};
+
+async function createCompanyEvent(
+  request: Request,
+  admin: NonNullable<Awaited<ReturnType<typeof requireAdmin>>>,
+  companyId: string,
+  event: CompanyEvent,
+) {
+  const requested = event.emailRequested !== false;
+  const { data, error } = await authenticatedClient(request).rpc('create_company_event', {
+    target_company_id: companyId,
+    target_event_type: event.type,
+    event_title: event.title,
+    event_message: event.message,
+    event_translation_key: event.translationKey,
+    event_translation_params: event.translationParams ?? {},
+    should_send_email: requested,
+    email_subject: event.emailSubject,
+    email_message: event.emailMessage,
+  });
+  if (error) return {
+    notificationCreated: false,
+    email: { requested, accepted: false, error: 'event_queue_failed' } satisfies EmailResult,
+  };
+  const result = data as { notificationId: string; deliveryId?: string | null };
+  return {
+    notificationCreated: Boolean(result.notificationId),
+    email: result.deliveryId
+      ? await deliverCompanyEmail(admin.service, result.deliveryId, allowedOrigins, event.sensitiveEmailMessage)
+      : { requested: false, accepted: false } satisfies EmailResult,
+  };
+}
+
+function combinedEmail(events: Array<{ email: EmailResult }>): EmailResult {
+  const requested = events.filter((event) => event.email.requested);
+  if (!requested.length) return { requested: false, accepted: false };
+  const failed = requested.find((event) => !event.email.accepted)?.email;
+  if (failed) return failed;
+  return requested[requested.length - 1].email;
 }
 
 Deno.serve(async (request) => {
@@ -203,9 +255,22 @@ Deno.serve(async (request) => {
       return json(request, { company, password }, 201);
     }
 
+    if (action === 'retry-email') {
+      const deliveryId = String(body.deliveryId ?? '');
+      if (!deliveryId) return json(request, { error: 'Gönderim kaydı geçersiz.' }, 400);
+      const retryPassword = String(body.password ?? '');
+      if (retryPassword.length > 128) return json(request, { error: 'Şifre geçersiz.' }, 400);
+      const sensitiveMessage = retryPassword
+        ? `Firma giriş şifreniz yenilendi.\nYeni şifreniz: ${retryPassword}\nBu şifreyi güvenli bir yerde saklayın.`
+        : undefined;
+      const email = await deliverCompanyEmail(service, deliveryId, allowedOrigins, sensitiveMessage);
+      return json(request, { email }, email.accepted ? 200 : 502);
+    }
+
     const companyId = String(body.companyId ?? '');
     const { data: company } = await service.from('companies')
-      .select('id,name,email,auth_user_id,auth_email,is_active,removed_at').eq('id', companyId).maybeSingle();
+      .select('id,name,email,auth_user_id,auth_email,is_active,removed_at,location_id,block,floor,office_code,logo_path')
+      .eq('id', companyId).maybeSingle();
     if (!company) return json(request, { error: 'Firma bulunamadı.' }, 404);
 
     if (action === 'reset') {
@@ -215,7 +280,16 @@ Deno.serve(async (request) => {
       if (error) return json(request, { error: error.message }, 400);
       await service.from('notifications').update({ read_at: new Date().toISOString() })
         .eq('audience', 'admin').eq('type', 'password_request').eq('company_id', company.id).is('read_at', null);
-      return json(request, { password });
+      const event = await createCompanyEvent(request, admin, company.id, {
+        type: 'company_password_changed',
+        title: 'Firma giriş şifreniz yenilendi',
+        message: 'Firma giriş şifreniz yönetim tarafından yenilendi.',
+        translationKey: 'notifications.companyPasswordChanged',
+        emailSubject: 'TeknoTakip | Firma Şifreniz Yenilendi',
+        emailMessage: 'Firma giriş şifreniz yönetim tarafından yenilendi.',
+        sensitiveEmailMessage: `Firma giriş şifreniz yenilendi.\nYeni şifreniz: ${password}\nBu şifreyi güvenli bir yerde saklayın.`,
+      });
+      return json(request, { password, notificationCreated: event.notificationCreated, email: event.email });
     }
 
     if (action === 'set-email') {
@@ -226,9 +300,16 @@ Deno.serve(async (request) => {
       const { error } = await service.auth.admin.updateUserById(company.auth_user_id, {
         email: nextEmail, email_confirm: true,
       });
-      return error
-        ? json(request, { error: 'E-posta adresi kullanılamıyor.' }, 409)
-        : json(request, { ok: true, email: nextEmail });
+      if (error) return json(request, { error: 'E-posta adresi kullanılamıyor.' }, 409);
+      const event = await createCompanyEvent(request, admin, company.id, {
+        type: 'company_email_changed',
+        title: 'Giriş e-posta adresiniz güncellendi',
+        message: 'Firma giriş ve bildirim e-posta adresiniz yönetim tarafından güncellendi.',
+        translationKey: 'notifications.companyEmailChanged',
+        emailSubject: 'TeknoTakip | Giriş E-Postanız Güncellendi',
+        emailMessage: 'Firma giriş ve bildirim e-posta adresiniz güncellendi. Bundan sonraki girişlerinizde yeni e-posta adresinizi kullanın.',
+      });
+      return json(request, { ok: true, email: nextEmail, notificationCreated: event.notificationCreated, emailResult: event.email });
     }
 
     if (action === 'update') {
@@ -241,7 +322,13 @@ Deno.serve(async (request) => {
       const { data: occupied } = await service.from('companies').select('id').eq('location_id', locationId)
         .is('removed_at', null).neq('id', company.id).limit(1).maybeSingle();
       if (!name || !nextEmail || !location?.is_active || occupied) return json(request, { error: 'Firma veya lokasyon bilgisi geçersiz.' }, 409);
-      if (nextEmail !== company.email && company.auth_user_id) {
+      const emailChanged = nextEmail !== company.email;
+      const infoChanges = [
+        ...(name !== company.name ? ['firma adı'] : []),
+        ...(locationId !== company.location_id ? ['lokasyon'] : []),
+        ...(logoPath !== company.logo_path ? ['logo'] : []),
+      ];
+      if (emailChanged && company.auth_user_id) {
         const { error: emailError } = await service.auth.admin.updateUserById(company.auth_user_id, {
           email: nextEmail, email_confirm: true,
         });
@@ -252,18 +339,57 @@ Deno.serve(async (request) => {
         block: location.block, floor: location.floor, office_code: location.office_code,
         logo_path: logoPath,
       }).eq('id', company.id);
-      return error ? json(request, { error: error.message }, 400) : json(request, { ok: true });
+      if (error) return json(request, { error: error.message }, 400);
+      const events = [];
+      if (emailChanged) events.push(await createCompanyEvent(request, admin, company.id, {
+        type: 'company_email_changed',
+        title: 'Giriş e-posta adresiniz güncellendi',
+        message: 'Firma giriş ve bildirim e-posta adresiniz yönetim tarafından güncellendi.',
+        translationKey: 'notifications.companyEmailChanged',
+        emailSubject: 'TeknoTakip | Giriş E-Postanız Güncellendi',
+        emailMessage: 'Firma giriş ve bildirim e-posta adresiniz güncellendi. Bundan sonraki girişlerinizde yeni e-posta adresinizi kullanın.',
+      }));
+      if (infoChanges.length) events.push(await createCompanyEvent(request, admin, company.id, {
+        type: 'company_info_changed',
+        title: 'Firma bilgileriniz güncellendi',
+        message: `Yönetim şu firma bilgilerini güncelledi: ${infoChanges.join(', ')}.`,
+        translationKey: 'notifications.companyInfoChanged',
+        translationParams: { fields: infoChanges.join(', ') },
+        emailSubject: 'TeknoTakip | Firma Bilgileriniz Güncellendi',
+        emailMessage: `Yönetim şu firma bilgilerinizi güncelledi: ${infoChanges.join(', ')}.`,
+        emailRequested: !emailChanged && body.sendEmail !== false,
+      }));
+      return json(request, {
+        ok: true,
+        notificationCreated: events.length > 0 && events.every((event) => event.notificationCreated),
+        email: combinedEmail(events),
+      });
     }
 
     if (action === 'set-active' && typeof body.isActive === 'boolean') {
       if (company.removed_at) return json(request, { error: 'Kaldırılmış firma değiştirilemez.' }, 409);
       const { error } = await service.from('companies').update({ is_active: body.isActive }).eq('id', company.id);
+      let authError = null;
       if (!error && company.auth_user_id) {
-        await service.auth.admin.updateUserById(company.auth_user_id, {
+        const result = await service.auth.admin.updateUserById(company.auth_user_id, {
           ban_duration: body.isActive ? 'none' : '876000h',
         });
+        authError = result.error;
       }
-      return error ? json(request, { error: error.message }, 400) : json(request, { ok: true });
+      if (error || authError) return json(request, { error: (error ?? authError)?.message }, 400);
+      const activeMessage = body.isActive
+        ? 'Firma hesabınız yeniden aktif edildi. TeknoTakip sistemine giriş yapabilirsiniz.'
+        : 'Firma hesabınız pasife alındı. Hesap yeniden aktif edilene kadar TeknoTakip sistemine giriş yapamazsınız.';
+      const event = await createCompanyEvent(request, admin, company.id, {
+        type: 'company_status_changed',
+        title: 'Firma durumunuz güncellendi',
+        message: activeMessage,
+        translationKey: 'notifications.companyStatusChanged',
+        translationParams: { status: body.isActive ? 'active' : 'inactive' },
+        emailSubject: 'TeknoTakip | Firma Durumunuz Güncellendi',
+        emailMessage: activeMessage,
+      });
+      return json(request, { ok: true, notificationCreated: event.notificationCreated, email: event.email });
     }
 
     if (action === 'remove') {

@@ -76,6 +76,13 @@ const statusLabels: Record<TicketStatus, string> = {
 const err = (value: unknown) =>
   value instanceof Error ? value.message : tx("errors.unexpected");
 const notifyChanged = () => dispatchEvent(new Event("notifications-changed"));
+type EmailOutcome = {
+  requested: boolean;
+  accepted: boolean;
+  deliveryId?: string;
+  providerMessageId?: string;
+  error?: string;
+};
 function useRoute() {
   const [route, setRoute] = useState(location.pathname + location.search);
   useEffect(() => {
@@ -984,7 +991,8 @@ function Notifications({
       );
     else if (item.meter_reading_id)
       go(`/admin/sayaclar?meter=${item.meter_reading_id}`);
-    else if (item.company_id) go(`/admin/firmalar?company=${item.company_id}`);
+    else if (item.company_id)
+      go(audience === "company" ? "/firma/hesap" : `/admin/firmalar?company=${item.company_id}`);
   };
   const notificationText = (item: Notification) => {
     if (item.translation_key === "notifications.ticketUpdated") {
@@ -997,6 +1005,19 @@ function Notifications({
     if (item.translation_key === "notifications.meterCreated") {
       const meterType = item.translation_params?.meterType ?? "natural_gas";
       return { title: t("notifications.meterCreated.title"), message: t(`notifications.meterCreated.message.${meterType}`) };
+    }
+    if (item.translation_key === "notifications.companyPasswordChanged")
+      return { title: t("notifications.companyPasswordChanged.title"), message: t("notifications.companyPasswordChanged.message") };
+    if (item.translation_key === "notifications.companyEmailChanged")
+      return { title: t("notifications.companyEmailChanged.title"), message: t("notifications.companyEmailChanged.message") };
+    if (item.translation_key === "notifications.companyInfoChanged")
+      return {
+        title: t("notifications.companyInfoChanged.title"),
+        message: t("notifications.companyInfoChanged.message", { fields: item.translation_params?.fields ?? "" }),
+      };
+    if (item.translation_key === "notifications.companyStatusChanged") {
+      const status = item.translation_params?.status === "active" ? "active" : "inactive";
+      return { title: t("notifications.companyStatusChanged.title"), message: t(`notifications.companyStatusChanged.message.${status}`) };
     }
     return { title: item.title, message: item.message };
   };
@@ -1583,6 +1604,7 @@ function AdminCompanies({ initialId }: { initialId: string | null }) {
   const [locations, setLocations] = useState<Location[]>([]);
   const [newLocation, setNewLocation] = useState("");
   const [passwords, setPasswords] = useState<Record<string, string>>({});
+  const [emailFailures, setEmailFailures] = useState<Record<string, string>>({});
   const [editing, setEditing] = useState<Company | null>(null);
   const [confirm, setConfirm] = useState<{
     company: Company;
@@ -1619,6 +1641,20 @@ function AdminCompanies({ initialId }: { initialId: string | null }) {
         50,
       );
   }, [initialId, rows]);
+  const showEmailResult = (companyId: string, email: EmailOutcome, successKey: string) => {
+    if (email.requested && !email.accepted) {
+      if (email.deliveryId)
+        setEmailFailures((current) => ({ ...current, [companyId]: email.deliveryId! }));
+      toast.show(t("company.operationEmailFailed"), "info");
+      return;
+    }
+    setEmailFailures((current) => {
+      const next = { ...current };
+      delete next[companyId];
+      return next;
+    });
+    toast.show(t(email.accepted ? `${successKey}Email` : successKey));
+  };
   const create = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const form = event.currentTarget;
@@ -1650,21 +1686,21 @@ function AdminCompanies({ initialId }: { initialId: string | null }) {
     setConfirm(null);
     try {
       if (action === "reset") {
-        const result = await invoke<{ password: string }>(
+        const result = await invoke<{ password: string; email: EmailOutcome }>(
           "company-credentials",
           { body: { action: "reset", companyId: company.id } },
         );
         setPasswords((x) => ({ ...x, [company.id]: result.password }));
-        toast.show(t("company.passwordCreated"));
+        showEmailResult(company.id, result.email, "company.passwordCreated");
       } else if (action === "deactivate") {
-        await invoke("company-credentials", {
+        const result = await invoke<{ email: EmailOutcome }>("company-credentials", {
           body: {
             action: "set-active",
             companyId: company.id,
             isActive: false,
           },
         });
-        toast.show(t("company.deactivated"));
+        showEmailResult(company.id, result.email, "company.deactivated");
         await load();
       } else {
         await invoke("company-credentials", {
@@ -1679,10 +1715,10 @@ function AdminCompanies({ initialId }: { initialId: string | null }) {
   };
   const activate = async (company: Company) => {
     try {
-      await invoke("company-credentials", {
+      const result = await invoke<{ email: EmailOutcome }>("company-credentials", {
         body: { action: "set-active", companyId: company.id, isActive: true },
       });
-      toast.show(t("company.activated"));
+      showEmailResult(company.id, result.email, "company.activated");
       await load();
     } catch (cause) {
       toast.show(err(cause), "error");
@@ -1702,7 +1738,7 @@ function AdminCompanies({ initialId }: { initialId: string | null }) {
     }
     try {
       const name = String(data.get("name")).trim();
-      await invoke("company-credentials", {
+      const result = await invoke<{ email: EmailOutcome }>("company-credentials", {
         body: {
           action: "update",
           companyId: company.id,
@@ -1713,10 +1749,32 @@ function AdminCompanies({ initialId }: { initialId: string | null }) {
         },
       });
       setEditing(null);
-      toast.show(t("company.updated"));
+      showEmailResult(company.id, result.email, "company.updated");
       await load();
     } catch (cause) {
       toast.show(err(cause), "error");
+    }
+  };
+  const retryEmail = async (company: Company) => {
+    const deliveryId = emailFailures[company.id];
+    if (!deliveryId) return;
+    try {
+      const result = await invoke<{ email: EmailOutcome }>("company-credentials", {
+        body: {
+          action: "retry-email",
+          deliveryId,
+          ...(passwords[company.id] ? { password: passwords[company.id] } : {}),
+        },
+      });
+      if (!result.email.accepted) throw new Error("Email not accepted");
+      setEmailFailures((current) => {
+        const next = { ...current };
+        delete next[company.id];
+        return next;
+      });
+      toast.show(t("company.emailRetrySent"));
+    } catch {
+      toast.show(t("company.emailRetryFailed"), "error");
     }
   };
   return (
@@ -1751,9 +1809,11 @@ function AdminCompanies({ initialId }: { initialId: string | null }) {
               company={company}
               locations={locations}
               password={passwords[company.id]}
+              emailFailed={Boolean(emailFailures[company.id])}
               onEdit={() => setEditing(company)}
               onConfirm={(action) => setConfirm({ company, action })}
               onActivate={() => void activate(company)}
+              onRetryEmail={() => void retryEmail(company)}
               toast={toast.show}
             />
           ))}
@@ -1793,17 +1853,21 @@ function AdminCompanies({ initialId }: { initialId: string | null }) {
 function CompanyCard({
   company,
   password,
+  emailFailed,
   onEdit,
   onConfirm,
   onActivate,
+  onRetryEmail,
   toast,
 }: {
   company: Company;
   password?: string;
+  emailFailed: boolean;
   locations: Location[];
   onEdit: () => void;
   onConfirm: (a: "reset" | "deactivate" | "remove") => void;
   onActivate: () => void;
+  onRetryEmail: () => void;
   toast: (m: string, k?: "success" | "error" | "info") => void;
 }) {
   const { t } = useTranslation();
@@ -1871,6 +1935,11 @@ function CompanyCard({
             </button>
           </div>
         ) : null}
+      {emailFailed ? (
+        <button type="button" className="btn-secondary" onClick={onRetryEmail}>
+          {t("ticket.retryEmail")}
+        </button>
+      ) : null}
     </article>
   );
 }
