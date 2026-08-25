@@ -74,7 +74,8 @@ export async function deliverCompanyEmail(
   const now = new Date().toISOString();
   const { data: claimed } = await service.from('email_deliveries').update({
     delivery_status: 'sending', last_attempt_at: now,
-    attempt_count: Number(delivery.attempt_count ?? 0) + 1, last_error_code: null,
+    attempt_count: Number(delivery.attempt_count ?? 0) + 1,
+    email_requested: true, email_accepted: false, last_error_code: null,
   }).eq('id', deliveryId).eq('updated_at', delivery.updated_at).select('*').maybeSingle();
   if (!claimed) return { requested: true, accepted: false, error: 'delivery_in_progress', deliveryId };
 
@@ -103,19 +104,20 @@ export async function deliverCompanyEmail(
     const payload = await response.json().catch(() => ({}));
     if (!response.ok || !payload.id) {
       await service.from('email_deliveries').update({
-        delivery_status: 'failed', last_error_code: `provider_${response.status}`,
+        delivery_status: 'failed', email_accepted: false, last_error_code: `provider_${response.status}`,
         recipient_email: company.email,
       }).eq('id', deliveryId);
       return { requested: true, accepted: false, error: 'email_provider_failed', deliveryId };
     }
     await service.from('email_deliveries').update({
-      delivery_status: 'sent', provider_message_id: String(payload.id),
+      delivery_status: 'sent', email_accepted: true, provider_message_id: String(payload.id),
       recipient_email: company.email, sent_at: new Date().toISOString(), last_error_code: null,
     }).eq('id', deliveryId);
     return { requested: true, accepted: true, deliveryId, providerMessageId: String(payload.id) };
   } catch {
     await service.from('email_deliveries').update({
-      delivery_status: 'failed', last_error_code: 'provider_unreachable', recipient_email: company.email,
+      delivery_status: 'failed', email_accepted: false,
+      last_error_code: 'provider_unreachable', recipient_email: company.email,
     }).eq('id', deliveryId);
     return { requested: true, accepted: false, error: 'email_provider_failed', deliveryId };
   }
