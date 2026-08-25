@@ -43,18 +43,21 @@ function configuredBaseUrl() {
 async function deliver(request: Request, admin: NonNullable<Awaited<ReturnType<typeof requireAdmin>>>, deliveryId: string) {
   const { service } = admin;
   const { data: delivery } = await service.from('email_deliveries').select('*').eq('id', deliveryId).maybeSingle();
-  if (!delivery) return { status: 'failed' as const, code: 'delivery_not_found' };
-  if (delivery.delivery_status === 'sent') return { status: 'sent' as const, deliveryId };
+  if (!delivery) return { requested: true, accepted: false, error: 'delivery_not_found' };
+  if (delivery.delivery_status === 'sent') return {
+    requested: true, accepted: true, deliveryId,
+    ...(delivery.provider_message_id ? { providerMessageId: String(delivery.provider_message_id) } : {}),
+  };
   if (delivery.delivery_status === 'sending' && delivery.last_attempt_at
     && Date.now() - new Date(delivery.last_attempt_at).getTime() < 2 * 60_000)
-    return { status: 'failed' as const, code: 'delivery_in_progress', deliveryId };
+    return { requested: true, accepted: false, error: 'delivery_in_progress', deliveryId };
 
   const now = new Date().toISOString();
   const { data: claimed } = await service.from('email_deliveries').update({
     delivery_status: 'sending', last_attempt_at: now,
     attempt_count: Number(delivery.attempt_count ?? 0) + 1, last_error_code: null,
   }).eq('id', deliveryId).eq('updated_at', delivery.updated_at).select('*').maybeSingle();
-  if (!claimed) return { status: 'failed' as const, code: 'delivery_in_progress', deliveryId };
+  if (!claimed) return { requested: true, accepted: false, error: 'delivery_in_progress', deliveryId };
 
   const [{ data: company }, apiKey, from, baseUrl] = await Promise.all([
     service.from('companies').select('name,email,is_active,removed_at').eq('id', claimed.company_id).maybeSingle(),
@@ -64,7 +67,7 @@ async function deliver(request: Request, admin: NonNullable<Awaited<ReturnType<t
   ]);
   if (!company?.email || !company.is_active || company.removed_at || !apiKey || !from || !baseUrl) {
     await service.from('email_deliveries').update({ delivery_status: 'failed', last_error_code: 'email_not_configured' }).eq('id', deliveryId);
-    return { status: 'failed' as const, code: 'email_not_configured', deliveryId };
+    return { requested: true, accepted: false, error: 'email_not_configured', deliveryId };
   }
 
   const ticketUrl = `${baseUrl}/firma/talepler?ticket=${encodeURIComponent(claimed.ticket_id)}`;
@@ -94,15 +97,18 @@ async function deliver(request: Request, admin: NonNullable<Awaited<ReturnType<t
     const payload = await response.json().catch(() => ({}));
     if (!response.ok || !payload.id) {
       await service.from('email_deliveries').update({ delivery_status: 'failed', last_error_code: `provider_${response.status}` }).eq('id', deliveryId);
-      return { status: 'failed' as const, code: 'email_provider_failed', deliveryId };
+      return { requested: true, accepted: false, error: 'email_provider_failed', deliveryId };
     }
     await service.from('email_deliveries').update({
       delivery_status: 'sent', provider_message_id: String(payload.id), sent_at: new Date().toISOString(), last_error_code: null,
     }).eq('id', deliveryId);
-    return { status: 'sent' as const, deliveryId };
+    return {
+      requested: true, accepted: true, deliveryId,
+      providerMessageId: String(payload.id),
+    };
   } catch {
     await service.from('email_deliveries').update({ delivery_status: 'failed', last_error_code: 'provider_unreachable' }).eq('id', deliveryId);
-    return { status: 'failed' as const, code: 'email_provider_failed', deliveryId };
+    return { requested: true, accepted: false, error: 'email_provider_failed', deliveryId };
   }
 }
 
@@ -121,7 +127,7 @@ Deno.serve(async (request) => {
       const deliveryId = String(body.deliveryId ?? '');
       if (!deliveryId) return json(request, { error: 'Gönderim kaydı geçersiz.', code: 'invalid_delivery' }, 400);
       const email = await deliver(request, admin, deliveryId);
-      return json(request, { ticketUpdated: false, email }, email.status === 'sent' ? 200 : 502);
+      return json(request, { ticketUpdated: false, email }, email.accepted ? 200 : 502);
     }
     if (action !== 'update_ticket') return json(request, { error: 'Geçersiz işlem.', code: 'invalid_action' }, 400);
 
@@ -136,7 +142,7 @@ Deno.serve(async (request) => {
     const result = data as { ticketId: string; changed: boolean; notificationCreated: boolean; deliveryId?: string | null };
     const email = result.deliveryId
       ? await deliver(request, admin, result.deliveryId)
-      : { status: 'skipped' as const };
+      : { requested: false, accepted: false };
     return json(request, { ticketUpdated: true, changed: result.changed, notificationCreated: result.notificationCreated, email });
   } catch {
     return json(request, { error: 'İşlem tamamlanamadı.', code: 'unexpected' }, 500);

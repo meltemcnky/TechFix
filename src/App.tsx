@@ -1210,7 +1210,13 @@ function AdminTickets({ initialId }: { initialId: string | null }) {
     const next = String(data.get("status")) as TicketStatus;
     try {
       const result = await invoke<{
-        email: { status: "sent" | "failed" | "skipped"; deliveryId?: string };
+        email: {
+          requested: boolean;
+          accepted: boolean;
+          deliveryId?: string;
+          providerMessageId?: string;
+          error?: string;
+        };
       }>("admin-ticket-update", {
         body: {
           action: "update_ticket",
@@ -1220,12 +1226,12 @@ function AdminTickets({ initialId }: { initialId: string | null }) {
           sendEmail: data.get("sendEmail") === "on",
         },
       });
-      if (result.email.status === "failed" && result.email.deliveryId) {
+      if (result.email.requested && !result.email.accepted && result.email.deliveryId) {
         setEmailFailures((x) => ({ ...x, [id]: result.email.deliveryId! }));
         toast.show(tx("ticket.savedEmailFailed"), "info");
       } else {
         setEmailFailures((x) => { const nextFailures = { ...x }; delete nextFailures[id]; return nextFailures; });
-        toast.show(result.email.status === "sent" ? tx("ticket.savedEmailSent") : tx("ticket.saved"));
+        toast.show(result.email.accepted ? tx("ticket.savedEmailSent") : tx("ticket.saved"));
       }
       load();
       notifyChanged();
